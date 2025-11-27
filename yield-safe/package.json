@@ -1,0 +1,15 @@
+{
+  "name": "yield-safe",
+  "version": "1.0.0",
+  "description": "**Yield Safe** is a DeFi protocol on Cardano that protects liquidity providers from impermanent loss (IL) by automatically monitoring pool positions and enforcing user-defined IL limits through smart contracts.",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  }
+}

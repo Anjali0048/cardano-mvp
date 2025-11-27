@@ -20,8 +20,13 @@ async function main() {
       config.network
     );
     
-    // Set wallet from private key
-    lucid.selectWalletFromPrivateKey(config.keeper.privateKey);
+    // Set wallet from private key (skip for demo mode)
+    if (config.keeper.privateKey && config.keeper.privateKey !== "demo_mode") {
+      lucid.selectWalletFromPrivateKey(config.keeper.privateKey);
+      logger.info("🔑 Wallet configured from private key");
+    } else {
+      logger.info("🔑 Running in demo mode - no wallet configured");
+    }
     
     // Initialize services
     const database = new DatabaseService(config.database.path);
@@ -74,7 +79,8 @@ async function main() {
     });
     
   } catch (error) {
-    logger.error("❌ Failed to start Yield Safe Keeper Bot:", error);
+    logger.error("❌ Failed to start Yield Safe Keeper Bot:");
+    console.error(error);
     process.exit(1);
   }
 }

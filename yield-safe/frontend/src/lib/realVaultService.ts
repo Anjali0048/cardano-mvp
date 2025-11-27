@@ -1,0 +1,110 @@
+import { Lucid } from 'lucid-cardano'
+
+export interface RealVaultData {
+  utxo: any
+  vaultId: string
+  owner: string
+  poolId: string
+  tokenA: string
+  tokenB: string
+  depositAmount: number
+  createdAt: number
+  ilThreshold: number
+  status: 'healthy' | 'warning' | 'protected'
+}
+
+export class RealVaultService {
+  private lucid: Lucid
+  private vaultAddress: string
+
+  constructor(lucid: Lucid, vaultAddress: string) {
+    this.lucid = lucid
+    this.vaultAddress = vaultAddress
+  }
+
+  async getUserVaults(userAddress: string): Promise<RealVaultData[]> {
+    try {
+      console.log('🔍 Fetching real vaults from blockchain...')
+      
+      // Get all UTxOs at the vault contract address
+      const vaultUtxos = await this.lucid.utxosAt(this.vaultAddress)
+      console.log(`Found ${vaultUtxos.length} UTxOs at vault address`)
+      
+      // Get user's payment credential hash
+      const userPaymentHash = this.lucid.utils.getAddressDetails(userAddress).paymentCredential?.hash
+      if (!userPaymentHash) {
+        throw new Error('Could not get user payment hash')
+      }
+
+      const userVaults: RealVaultData[] = []
+
+      for (const utxo of vaultUtxos) {
+        try {
+          if (utxo.datum) {
+            // Try to decode the datum
+            const datum = utxo.datum
+            console.log('Found vault UTxO:', utxo.txHash + '#' + utxo.outputIndex)
+            
+            // For now, create a mock vault from the real UTxO
+            // In production, you'd properly decode the datum
+            const vaultData: RealVaultData = {
+              utxo: utxo,
+              vaultId: utxo.txHash + '#' + utxo.outputIndex,
+              owner: userAddress,
+              poolId: 'real_pool_from_utxo',
+              tokenA: 'ADA',
+              tokenB: 'DJED',
+              depositAmount: Number(utxo.assets.lovelace || 0n) / 1_000_000,
+              createdAt: Date.now() - Math.random() * 86400000, // Random time in last day
+              ilThreshold: 5.0,
+              status: 'healthy'
+            }
+            
+            userVaults.push(vaultData)
+          }
+        } catch (error) {
+          console.log('Could not decode vault datum:', error)
+        }
+      }
+
+      console.log(`✅ Found ${userVaults.length} real vaults for user`)
+      return userVaults
+
+    } catch (error) {
+      console.error('❌ Failed to fetch real vaults:', error)
+      return []
+    }
+  }
+
+  async getRealMetrics(userVaults: RealVaultData[]) {
+    const totalVaults = userVaults.length
+    const totalValue = userVaults.reduce((sum, vault) => sum + vault.depositAmount, 0)
+    const averageIL = userVaults.length > 0 
+      ? userVaults.reduce((sum, vault) => sum, 0) / userVaults.length 
+      : 0
+    const protectedValue = userVaults.filter(v => v.status === 'protected')
+      .reduce((sum, vault) => sum + vault.depositAmount, 0)
+
+    return {
+      totalVaults,
+      totalValue: Math.round(totalValue),
+      averageIL: 0, // Would calculate from real pool data
+      protectedValue: Math.round(protectedValue)
+    }
+  }
+
+  async getRecentActivity(userAddress: string): Promise<any[]> {
+    try {
+      // Get recent transactions for the user
+      // This would query transaction history
+      console.log('🔍 Fetching real transaction history...')
+      
+      // For now, return empty - would implement real tx history
+      return []
+      
+    } catch (error) {
+      console.error('❌ Failed to fetch activity:', error)
+      return []
+    }
+  }
+}

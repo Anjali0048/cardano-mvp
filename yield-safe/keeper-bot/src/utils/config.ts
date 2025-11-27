@@ -47,9 +47,13 @@ export async function loadConfig(): Promise<KeeperConfig> {
   
   // Validate required environment variables
   const requiredEnvVars = [
-    "BLOCKFROST_API_KEY",
-    "KEEPER_PRIVATE_KEY"
+    "BLOCKFROST_API_KEY"
   ];
+  
+  // Only require private key if not in demo mode
+  if (process.env.KEEPER_PRIVATE_KEY !== "demo_mode") {
+    requiredEnvVars.push("KEEPER_PRIVATE_KEY");
+  }
   
   for (const envVar of requiredEnvVars) {
     if (!process.env[envVar]) {
@@ -62,11 +66,13 @@ export async function loadConfig(): Promise<KeeperConfig> {
     blockfrost: {
       url: network === "Mainnet" 
         ? "https://cardano-mainnet.blockfrost.io/api/v0"
+        : network === "Preview"
+        ? "https://cardano-preview.blockfrost.io/api/v0"
         : "https://cardano-preprod.blockfrost.io/api/v0",
       apiKey: process.env.BLOCKFROST_API_KEY!
     },
     keeper: {
-      privateKey: process.env.KEEPER_PRIVATE_KEY!,
+      privateKey: process.env.KEEPER_PRIVATE_KEY || "demo_mode",
       defaultILThreshold: parseInt(process.env.DEFAULT_IL_THRESHOLD || "500"), // 5%
       maxOperationsPerHour: parseInt(process.env.MAX_OPERATIONS_PER_HOUR || "100"),
       minVaultSize: parseInt(process.env.MIN_VAULT_SIZE || "1000000") // 1 ADA

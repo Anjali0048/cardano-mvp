@@ -1,0 +1,10 @@
+{
+  "network": "preview",
+  "deployed_at": "2025-11-27T16:22:00Z",
+  "contracts": {
+    "vault_validator": {
+      "address": "addr_test1wpm50as7ukmxnl2wpmhrjtgf09get6v03j88cxf5nauxrvq2clnt3",
+      "script_hash": "7747f61ee5b669fd4e0eee392d09795195e98f8c8e7c19349f7861b0"
+    }
+  }
+}
