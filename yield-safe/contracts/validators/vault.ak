@@ -108,10 +108,20 @@ validator {
         let valid_signature = signed_by_owner
         let emergency_enabled = emergency_withdraw
         
-        // All LP tokens should be withdrawn
-        let input_lp_amount = quantity_of(own_input.output.value, lp_asset.policy_id, lp_asset.token_name)
+        // Must have some value to withdraw (at least min ADA)
+        let input_ada = quantity_of(own_input.output.value, #"", #"")
+        let has_funds = input_ada > 0
         
-        valid_signature && emergency_enabled && input_lp_amount > 0
+        // The vault UTxO must be fully consumed (no output back to script)
+        // This ensures all funds are withdrawn, not just partially
+        let script_address = own_input.output.address
+        let vault_fully_consumed = !list.any(
+          context.transaction.outputs,
+          fn(output) { output.address == script_address }
+        )
+        
+        // All conditions must be true for emergency exit
+        valid_signature && emergency_enabled && has_funds && vault_fully_consumed
       }
     }
   }

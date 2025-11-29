@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useWallet } from '../providers/WalletProvider'
-import { Data } from 'lucid-cardano'
+import { RealVaultService } from '../lib/realVaultService'
+import { config } from '../lib/apiConfig'
+import { Data, Constr } from 'lucid-cardano'
 
 // Vault info interface for component state
 interface VaultInfo {
@@ -20,60 +22,89 @@ interface VaultInfo {
 }
 
 export function VaultManagement() {
-  const { isConnected, lucid } = useWallet()
+  const { isConnected, lucid, address, ensureWalletSelected } = useWallet()
   const [vaults, setVaults] = useState<VaultInfo[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [showBrokenVaults, setShowBrokenVaults] = useState(false)
-  
+  const [vaultAddress, setVaultAddress] = useState<string | null>(null)
+
+  // Fetch vault address from backend
   useEffect(() => {
-    if (isConnected && lucid) {
+    const fetchVaultAddress = async () => {
+      try {
+        const response = await fetch(config.api.endpoints.vaultAddress)
+        const data = await response.json()
+        if (data.success) {
+          setVaultAddress(data.vaultAddress)
+          console.log('✅ Vault address loaded:', data.vaultAddress)
+          console.log(`   Network: ${data.networkDisplay || data.networkName}`)
+        }
+      } catch (error) {
+        console.error('❌ Failed to fetch vault address:', error)
+      }
+    }
+    fetchVaultAddress()
+  }, [])
+
+  useEffect(() => {
+    if (isConnected && lucid && address && vaultAddress) {
       loadUserVaults()
     }
-  }, [isConnected, lucid])
+  }, [isConnected, lucid, address, vaultAddress, showBrokenVaults])
 
   const loadUserVaults = async () => {
+    if (!address || !lucid || !vaultAddress) return
+    
     setLoading(true)
+    setError(null)
     try {
-      const userAddress = await lucid!.wallet.address()
-      console.log('🔍 Loading vaults for:', userAddress)
+      console.log('🔍 Loading vaults for:', address)
       
-      // Try to get vault data from backend API first
-      try {
-        const response = await fetch('http://localhost:3001/api/vault/list', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            userAddress,
-            includeOldVaults: showBrokenVaults 
-          })
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          console.log('✅ Loaded vaults from backend:', data.vaults)
-          console.log('🔍 Debug info:', {
-            userPaymentHash: data.userPaymentHash,
-            totalVaultsInDb: data.totalVaultsInDb,
-            returnedVaults: data.vaults?.length || 0,
-            message: data.message
-          })
-          setVaults(data.vaults || [])
-          return
-        }
-      } catch (apiError) {
-        console.log('⚠️ Backend API not available:', apiError)
-        setVaults([])
-      }
+      // Use RealVaultService to fetch from blockchain (same as RealDashboard)
+      const vaultService = new RealVaultService(lucid, vaultAddress)
+      const realVaults = await vaultService.getUserVaults(address)
+      
+      console.log(`✅ Found ${realVaults.length} vaults from blockchain`)
+      
+      // Transform RealVaultData to VaultInfo for display
+      const transformedVaults: VaultInfo[] = realVaults.map(vault => ({
+        vaultId: vault.vaultId,
+        lpTokens: vault.lpTokens, // Use actual LP tokens from vault datum
+        depositAmount: vault.depositAmount,
+        tokenPair: `${vault.tokenA}/${vault.tokenB}`,
+        ilPercentage: vault.currentIL || 0,
+        status: vault.shouldTriggerProtection ? 'Protected' : 'Active',
+        entryPrice: vault.entryPrice,
+        currentPrice: vault.currentPrice,
+        createdAt: vault.createdAt,
+        ilThreshold: vault.ilThreshold,
+        emergencyWithdraw: true
+      }))
+      
+      setVaults(transformedVaults)
       
     } catch (error) {
-      console.error('❌ Failed to load vaults:', error)
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      console.error('❌ Failed to load vaults:', errorMsg)
+      setError(`Failed to load vaults: ${errorMsg}`)
+      setVaults([])
     } finally {
       setLoading(false)
     }
   }
 
   const handleEmergencyExit = async (vault: VaultInfo) => {
-    if (!lucid || !confirm('Emergency exit will charge a 1% fee. Continue?')) return
+    if (!lucid || !address) return
+    
+    const shouldProceed = confirm(
+      '🚨 Emergency Exit Process:\n\n' +
+      'Step 1: Exit vault (LP tokens → your wallet)\n' +
+      'Step 2: Create Minswap withdraw order (LP → ADA + tokens)\n\n' +
+      'Continue with exit?'
+    )
+    
+    if (!shouldProceed) return
     
     // Quick check from API data
     if (!vault.emergencyWithdraw) {
@@ -81,22 +112,26 @@ export function VaultManagement() {
       return
     }
     
+    let toastMsg: string | null = null
     try {
       const vaultId = vault.vaultId
       console.log('🚨 Starting emergency exit for vault:', vaultId)
+      toastMsg = '🔄 Fetching vault details...'
+      console.log(toastMsg)
       
       // Get vault contract address AND validator script from backend API
       console.log('🔄 Fetching vault address and validator from backend...')
-      const addressResponse = await fetch('http://localhost:3001/api/vault/address')
+      const addressResponse = await fetch(config.api.endpoints.vaultAddress)
       if (!addressResponse.ok) {
         throw new Error(`Failed to get vault address: ${addressResponse.status}`)
       }
-      const { vaultAddress, validator } = await addressResponse.json()
+      const { vaultAddress, validator, networkDisplay } = await addressResponse.json()
       console.log('✅ Got vault address:', vaultAddress)
+      console.log('✅ Network:', networkDisplay)
       console.log('✅ Got validator from backend:', validator.type)
       
-      // Get user address
-      const userAddress = await lucid.wallet.address()
+      // Use user address from wallet provider
+      const userAddress = address
       console.log('👤 User address:', userAddress)
       
       // FETCH UTXOs at vault address from blockchain
@@ -123,7 +158,31 @@ export function VaultManagement() {
       
       console.log('✅ Found vault UTXO:', vaultUtxo.txHash + '#' + vaultUtxo.outputIndex)
       console.log('📋 UTXO assets:', Object.keys(vaultUtxo.assets))
+      // Convert BigInt assets to strings for logging
+      const assetsForLogging = Object.fromEntries(
+        Object.entries(vaultUtxo.assets).map(([key, val]) => [key, val.toString()])
+      )
+      console.log('📋 UTXO asset details:', JSON.stringify(assetsForLogging, null, 2))
       console.log('📋 UTXO has datum:', !!vaultUtxo.datum)
+      if (vaultUtxo.datum) {
+        console.log('📋 UTXO datum value:', vaultUtxo.datum)
+        console.log('📋 UTXO datum type:', typeof vaultUtxo.datum)
+        try {
+          const decodedDatum = Data.from(vaultUtxo.datum)
+          console.log('📋 UTXO decoded datum:', JSON.stringify(decodedDatum, null, 2))
+        } catch (e) {
+          console.warn('⚠️ Could not decode datum:', e)
+        }
+      } else {
+        console.warn('⚠️ UTXO has no datum! This may cause script validation to fail.')
+      }
+      console.log('📋 Full UTXO object:', {
+        txHash: vaultUtxo.txHash,
+        outputIndex: vaultUtxo.outputIndex,
+        assets: assetsForLogging,
+        datum: vaultUtxo.datum ? '[datum exists]' : null,
+        scriptRef: vaultUtxo.scriptRef ? '[script ref exists]' : null
+      })
       
       // Setup validator script
       const script = {
@@ -131,47 +190,202 @@ export function VaultManagement() {
         script: validator.script
       }
       
-      // Create emergency exit redeemer  
-      // Use the same structure as vaultTransactions.ts
-      const VaultRedeemerSchema = Data.Enum([
-        Data.Object({ Deposit: Data.Object({}) }),
-        Data.Object({ Withdraw: Data.Object({ amount: Data.Integer() }) }),
-        Data.Object({ UpdatePolicy: Data.Object({ new_max_il: Data.Integer() }) }),
-        Data.Object({ EmergencyExit: Data.Object({}) })
-      ])
+      // Create emergency exit redeemer matching vault.ak type definition
+      // VaultRedeemer enum variants:
+      //   0: Deposit { amount: Int }
+      //   1: Withdraw { amount: Int, current_il: Int }
+      //   2: UpdatePolicy { new_policy: UserPolicy }
+      //   3: EmergencyExit (NO fields - simple variant)
       
-      // Create the redeemer as variant 3 (EmergencyExit)
-      const redeemer = { EmergencyExit: {} } as any
-      const emergencyExitRedeemer = Data.to(redeemer, VaultRedeemerSchema)
-      console.log('🔨 Emergency exit redeemer created')
+      // EmergencyExit is index 3 with no fields
+      // Lucid v0.10.7's collectFrom expects a serialized hex string for the redeemer
+      const emergencyExitRedeemer = Data.to(new Constr(3, []))
+      console.log('🔨 Emergency exit redeemer created (Constr 3)')
+      console.log('🔨 Redeemer details:', {
+        constrIndex: 3,
+        fields: [],
+        serializedHex: emergencyExitRedeemer,
+        hexLength: emergencyExitRedeemer.length
+      })
+
       
       // Build transaction
       // CRITICAL: Do NOT send a new UTxO back to the vault script
       // The validator expects no_output_to_script = True
-      console.log('🔨 Building transaction...')
-      const tx = await lucid
+      console.log('🔨 Building emergency exit transaction...')
+      toastMsg = '⚙️ Building exit transaction...'
+      
+      console.log('🔨 collectFrom details:', {
+        inputCount: 1,
+        inputAssets: assetsForLogging,
+        inputDatum: vaultUtxo.datum ? '[exists]' : '[missing]',
+        redeemer: emergencyExitRedeemer,
+        outputAddress: userAddress,
+        outputAssets: assetsForLogging
+      })
+      
+      // Helper function to properly handle assets with BigInt
+      const safeAssets: Record<string, bigint> = {}
+      for (const [key, value] of Object.entries(vaultUtxo.assets)) {
+        // Ensure values are BigInt
+        if (typeof value === 'bigint') {
+          safeAssets[key] = value
+        } else if (typeof value === 'number') {
+          safeAssets[key] = BigInt(value)
+        } else if (typeof value === 'string') {
+          safeAssets[key] = BigInt(value)
+        } else {
+          safeAssets[key] = value as bigint
+        }
+      }
+      
+      console.log('💰 Assets count:', Object.keys(safeAssets).length)
+      console.log('💰 Asset keys:', Object.keys(safeAssets))
+      
+      const txBuilder = lucid
         .newTx()
         .collectFrom([vaultUtxo], emergencyExitRedeemer)
         .attachSpendingValidator(script)
-        .payToAddress(userAddress, vaultUtxo.assets)  // Send all vault assets to user
-        .complete()
+        .payToAddress(userAddress, safeAssets)
+        .addSignerKey(lucid.utils.getAddressDetails(userAddress).paymentCredential!.hash)
       
-      console.log('✍️ Signing transaction with wallet...')
-      const signedTx = await tx.sign().complete()
-      console.log('✅ Transaction signed successfully')
+      console.log('🔨 Completing transaction (calculating fees)...')
+      const builtTx = await txBuilder.complete()
+      console.log('✅ Exit transaction built successfully')
+      console.log('🔍 Built transaction details:', {
+        txSize: builtTx.toString().length,
+        hasInputs: builtTx.toString().includes('input'),
+        hasRedeemers: builtTx.toString().includes('redeemer'),
+        hasDatum: builtTx.toString().includes('datum'),
+        txHex: builtTx.toString().substring(0, 200) + '...'
+      })
+      toastMsg = '✅ Transaction built, awaiting wallet signature...'
       
-      console.log('📤 Submitting signed transaction to blockchain...')
-      const txHash_result = await signedTx.submit()
+      console.log('✍️ Requesting wallet to sign exit transaction...')
       
-      alert(`🎯 Emergency exit successful! TX: ${txHash_result}`)
-      console.log('✅ Emergency exit completed:', txHash_result)
+      // CRITICAL FIX: Ensure wallet is properly selected in lucid before signing
+      await ensureWalletSelected()
+      
+      if (!lucid.wallet) {
+        console.error('❌ Lucid wallet not set! This should not happen.')
+        console.log('   Lucid instance:', lucid)
+        console.log('   Lucid.wallet:', lucid.wallet)
+        throw new Error('Wallet not connected to Lucid. Please disconnect and reconnect your wallet.')
+      }
+      
+      console.log('✅ Lucid wallet is properly set:', lucid.wallet)
+      
+      // Sign the transaction with the wallet (already completed, just sign and submit)
+      console.log('🔑 Signing transaction with wallet...')
+      const signedTx = await builtTx.sign().complete()
+      console.log('✅ Emergency exit transaction signed successfully')
+      
+      toastMsg = '📤 Submitting exit transaction...'
+      console.log('📤 Submitting emergency exit transaction...')
+      const exitTxHash = await signedTx.submit()
+      console.log('✅ Emergency exit transaction submitted:', exitTxHash)
+      
+      console.log('✅ Emergency exit completed:', exitTxHash)
+      alert(`✅ Step 1 Complete! Emergency exit TX: ${exitTxHash}\n\nWaiting for confirmation before creating withdraw order...`)
+      
+      // Wait for exit confirmation
+      console.log('⏳ Waiting for exit confirmation...')
+      await lucid.awaitTx(exitTxHash)
+      console.log('✅ Exit confirmed!')
+      
+      // Now create Minswap withdraw order
+      const shouldCreateOrder = confirm(
+        '✅ Emergency Exit Complete!\n\n' +
+        'Now create Minswap withdraw order to convert LP tokens → ADA + tokens?\n\n' +
+        '(Order will be processed by Minswap batchers)'
+      )
+      
+      if (shouldCreateOrder) {
+        await createMinswapWithdrawOrder(vault, exitTxHash)
+      }
       
       // Refresh vault list
       loadUserVaults()
       
     } catch (error) {
       console.error('❌ Emergency exit failed:', error)
-      alert(`❌ Emergency exit failed: ${error instanceof Error ? error.message : String(error)}`)
+      const errorMsg = error instanceof Error ? error.message : String(error)
+      alert(`❌ Emergency exit failed: ${errorMsg}`)
+    }
+  }
+
+  const createMinswapWithdrawOrder = async (vault: VaultInfo, exitTxHash: string) => {
+    try {
+      console.log('🔄 Creating Minswap withdraw order...')
+      
+      // Mock pool reserves (in production, fetch from pool data API)
+      const poolReserves = {
+        reserveA: '10000000000', // 10,000 ADA
+        reserveB: '15000000000', // 15,000 tokens
+        totalLiquidity: '12247448714' // sqrt(10000 * 15000) * 10^6
+      }
+      
+      const lpAsset = {
+        policyId: 'd6aae2059baee188f74917493cf7637e679cd219bdfbbf4dcbeb1d0b',
+        tokenName: '4144414449454400' // ADADJED in hex
+      }
+      
+      // Request withdraw order data from backend
+      const response = await fetch(config.api.endpoints.withdrawOrder, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lpAsset,
+          lpAmount: Math.floor(vault.lpTokens * 1_000000).toString(),
+          ...poolReserves,
+          userAddress: address,
+          slippage: 0.02
+        })
+      })
+      
+      if (!response.ok) {
+        throw new Error(`Backend error: ${response.status}`)
+      }
+      
+      const orderData = await response.json()
+      console.log('✅ Got withdraw order data from backend')
+      console.log('   Order Address:', orderData.orderAddress)
+      console.log('   Min Token A:', orderData.minTokenA)
+      console.log('   Min Token B:', orderData.minTokenB)
+      
+      // Build withdraw order transaction
+      const orderAssets: any = {
+        lovelace: BigInt(orderData.batcherFee),
+        [`${lpAsset.policyId}${lpAsset.tokenName}`]: BigInt(orderData.lpAmount)
+      }
+      
+      const orderTx = lucid!.newTx()
+        .payToContract(
+          orderData.orderAddress,
+          { inline: orderData.orderDatum },
+          orderAssets
+        )
+      
+      console.log('🔨 Building withdraw order transaction...')
+      const completedOrderTx = await orderTx.complete()
+      
+      console.log('✍️ Signing withdraw order transaction...')
+      const signedOrderTx = await completedOrderTx.sign().complete()
+      
+      console.log('📤 Submitting withdraw order...')
+      const orderTxHash = await signedOrderTx.submit()
+      
+      console.log('✅ Withdraw order created:', orderTxHash)
+      alert(
+        `🎯 Complete!\n\n` +
+        `Exit TX: ${exitTxHash.slice(0, 20)}...\n` +
+        `Order TX: ${orderTxHash.slice(0, 20)}...\n\n` +
+        `Minswap batchers will process your order soon!`
+      )
+      
+    } catch (error) {
+      console.error('❌ Failed to create withdraw order:', error)
+      alert(`⚠️ Emergency exit succeeded but withdraw order failed:\n${error}\n\nYou can manually create a withdraw order later.`)
     }
   }
 
@@ -210,6 +424,19 @@ export function VaultManagement() {
           )}
         </div>
       </div>
+      
+      {error && (
+        <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 mb-4">
+          <p className="text-red-400 font-medium">❌ Error loading vaults</p>
+          <p className="text-red-300 text-sm mt-1">{error}</p>
+          <button
+            onClick={() => loadUserVaults()}
+            className="mt-3 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
+          >
+            🔄 Retry
+          </button>
+        </div>
+      )}
       
       {loading ? (
         <div className="text-center text-blue-400">Loading your vaults...</div>
@@ -286,7 +513,7 @@ export function VaultManagement() {
                           const [tokenA, tokenB] = vault.tokenPair.split('/')
                           
                           // Calculate current IL using actual token pair
-                          fetch('http://localhost:3001/api/vault/il-status', {
+                          fetch(config.api.endpoints.ilStatus, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({

@@ -1,10 +1,11 @@
 {
   "network": "preview",
-  "deployed_at": "2025-11-27T16:22:00Z",
+  "deployed_at": "2025-11-29T05:20:00Z",
   "contracts": {
     "vault_validator": {
-      "address": "addr_test1wpm50as7ukmxnl2wpmhrjtgf09get6v03j88cxf5nauxrvq2clnt3",
-      "script_hash": "7747f61ee5b669fd4e0eee392d09795195e98f8c8e7c19349f7861b0"
+      "address": "addr_test1wqzsngca2uu8z8lk0hudfkw300cllua300r3exeeax70xcq4k9hyu",
+      "script_hash": "0509a31d5738711ff67df8d4d9d17bf1fff3b17bc71c9b39e9bcf360"
     }
-  }
+  },
+  "notes": "Updated with robust EmergencyExit handler and 6-field VaultDatum including initial_pool_state"
 }

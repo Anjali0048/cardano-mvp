@@ -9,6 +9,7 @@ export interface RealVaultData {
   tokenA: string
   tokenB: string
   depositAmount: number
+  lpTokens: number // LP token amount stored in vault
   entryPrice: number // NEW - track entry price for IL calculation
   createdAt: number
   ilThreshold: number
@@ -65,12 +66,13 @@ export class RealVaultService {
             let vaultData: RealVaultData
             
             try {
-              // Decode generic datum first - backend creates Constr(0, [...]) with 10 fields
+              // Decode generic datum first - NEW structure: Constr(0, [...]) with 6 nested fields
+              // VaultDatum { owner, policy, lp_asset, deposit_amount, deposit_time, initial_pool_state }
               const decodedDatum = Data.from(datum) as any
               
-              // Validate it's a Constr with expected number of fields
-              if (!decodedDatum.fields || decodedDatum.fields.length < 10) {
-                throw new Error(`Expected Constr with 10 fields, got ${decodedDatum.fields?.length || 0}`)
+              // Validate it's a Constr with expected number of fields (now 6)
+              if (!decodedDatum.fields || decodedDatum.fields.length < 6) {
+                throw new Error(`Expected Constr with 6 fields, got ${decodedDatum.fields?.length || 0}`)
               }
               
               // Helper to convert hex to string
@@ -84,7 +86,14 @@ export class RealVaultService {
                 }
               }
               
-              // Extract fields from Constr(0, [...]) structure (10 fields)
+              // Extract fields from new Constr(0, [...]) structure (6 nested fields):
+              // [0] owner: ByteArray
+              // [1] policy: UserPolicy { max_il_percent, deposit_ratio, emergency_withdraw }
+              // [2] lp_asset: Asset { policy_id, token_name }
+              // [3] deposit_amount: Int
+              // [4] deposit_time: Int
+              // [5] initial_pool_state: PoolState { reserve_a, reserve_b, total_lp_tokens, last_update_time }
+              
               const ownerHash = decodedDatum.fields[0]  // owner
               const ownerHex = (ownerHash && typeof ownerHash !== 'string')
                 ? Buffer.from(ownerHash).toString('hex')
@@ -103,48 +112,55 @@ export class RealVaultService {
               
               console.log(`   ✅ Owner match! Processing vault for user`)
               
-              // Extract pool ID (index 1)
-              const poolIdRaw = decodedDatum.fields[1]
-              let poolIdStr = 'minswap'
-              if (typeof poolIdRaw === 'string') {
-                poolIdStr = hexToString(poolIdRaw) || poolIdStr
-              } else if (poolIdRaw) {
-                poolIdStr = hexToString(Buffer.from(poolIdRaw).toString('hex')) || poolIdStr
-              }
+              // Extract policy (index 1) - UserPolicy { max_il_percent, deposit_ratio, emergency_withdraw }
+              const policyFields = decodedDatum.fields[1]?.fields || []
+              const ilThresholdBasisPoints = Number(policyFields[0] || 500) // max_il_percent
+              const ilThreshold = ilThresholdBasisPoints / 100 // Convert to percentage
               
-              // Extract asset_a (index 2) - Constr with [policyId, tokenName]
-              const assetAFields = decodedDatum.fields[2]?.fields || ['', '']
-              const tokenASymbol = hexToString(assetAFields[1]) || 'ADA'
+              // deposit_ratio is nested: AssetRatio { asset_a_amount, asset_b_amount }
+              const depositRatioFields = policyFields[1]?.fields || []
+              const assetAAmount = Number(depositRatioFields[0] || 0) // in lovelace
+              const assetBAmount = Number(depositRatioFields[1] || 0)
               
-              // Extract asset_b (index 3) - Constr with [policyId, tokenName]
-              const assetBFields = decodedDatum.fields[3]?.fields || ['', '']
-              const tokenBPolicyId = assetBFields[0] || ''
-              const tokenBSymbol = hexToString(assetBFields[1])
+              // Extract lp_asset (index 2) - Asset { policy_id, token_name }
+              const lpAssetFields = decodedDatum.fields[2]?.fields || ['', '']
+              const lpPolicyId = lpAssetFields[0] || ''
+              const lpTokenName = hexToString(lpAssetFields[1]) || 'LP'
               
-              // Extract amounts (indices 4, 5, 6)
-              const depositAmount = Number(decodedDatum.fields[4]) / 1_000_000  // deposit_amount
-              const tokenBAmount = Number(decodedDatum.fields[5]) / 1_000_000   // token_b_amount
-              const lpTokens = Number(decodedDatum.fields[6]) / 1_000_000       // lp_tokens
+              // Extract deposit_amount (index 3)
+              const lpTokens = Number(decodedDatum.fields[3]) // in micro units
               
-              // Extract timestamp (index 7) and IL threshold (index 8)
-              const depositTime = Number(decodedDatum.fields[7])                // deposit_time
-              const ilThreshold = Number(decodedDatum.fields[8]) / 100          // il_threshold
-              const entryPrice = Number(decodedDatum.fields[9]) / 1_000_000     // initial_price
+              // Extract deposit_time (index 4)
+              const depositTime = Number(decodedDatum.fields[4])
+              
+              // Extract initial_pool_state (index 5) - PoolState { reserve_a, reserve_b, total_lp_tokens, last_update_time }
+              const poolStateFields = decodedDatum.fields[5]?.fields || []
+              const initialReserveA = Number(poolStateFields[0] || 0)
+              const initialReserveB = Number(poolStateFields[1] || 0)
+              
+              // Calculate entry price from initial pool state
+              const entryPrice = initialReserveB > 0 ? initialReserveA / initialReserveB : 0
+              
+              // Determine token symbols from LP asset or use defaults
+              const tokenASymbol = 'ADA'
+              const tokenBSymbol = lpTokenName !== 'LP' ? lpTokenName : 'TOKEN'
               
               console.log(`   🏷️ Token B: ${tokenBSymbol}`)
               console.log(`   💰 Entry Price: ${entryPrice}`)
+              console.log(`   🎯 LP Tokens: ${lpTokens / 1_000_000}`)
               console.log(`   🛡️ IL Threshold: ${ilThreshold}%`)
               
               vaultData = {
                 utxo: utxo,
                 vaultId: utxo.txHash + '#' + utxo.outputIndex,
                 owner: ownerHex,
-                poolId: poolIdStr,
+                poolId: lpPolicyId || 'minswap',
                 tokenA: tokenASymbol,
                 tokenB: tokenBSymbol || 'UNKNOWN',
-                depositAmount: depositAmount,
+                depositAmount: assetAAmount / 1_000_000, // Convert lovelace to ADA for display
+                lpTokens: lpTokens / 1_000_000,           // Convert to display units
                 entryPrice: entryPrice,
-                createdAt: depositTime * 1000, // Convert to milliseconds
+                createdAt: depositTime, // Already in milliseconds from Date.now()
                 ilThreshold: ilThreshold,
                 status: 'healthy'
               }

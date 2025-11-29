@@ -7,6 +7,7 @@ import { BlockchainVaultSync } from "./services/blockchainVaultSync.js";
 import { logger } from "./utils/logger.js";
 import { loadConfig } from "./utils/config.js";
 import cron from "node-cron";
+import { startAPIServer } from "./apiServer.js";
 
 async function main() {
   try {
@@ -75,6 +76,10 @@ async function main() {
     cron.schedule("*/10 * * * *", async () => {
       await keeperBot.healthCheck();
     });
+    
+    // Start the API server
+    logger.info("🌐 Starting API server...");
+    await startAPIServer();
     
     logger.info("✅ Yield Safe Keeper Bot is running!");
     

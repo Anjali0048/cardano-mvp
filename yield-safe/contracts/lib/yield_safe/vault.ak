@@ -4,7 +4,7 @@ use aiken/hash.{Blake2b_224, Hash}
 use aiken/list
 use aiken/option
 use aiken/transaction.{
-  Input, Output, ScriptContext, Spend, Transaction, ValidityRange,
+  InlineDatum, Input, Output, ScriptContext, Spend, Transaction, ValidityRange,
 }
 use aiken/transaction/credential.{Address, Credential, VerificationKeyCredential}
 use aiken/transaction/value.{AssetName, PolicyId, Value, quantity_of}
@@ -123,9 +123,10 @@ validator {
         let output_lp_amount = quantity_of(own_output.value, lp_asset.policy_id, lp_asset.token_name)
         let correct_deposit = output_lp_amount == input_lp_amount + amount
         
-        // Datum should be updated
-        expect VaultDatum { deposit_amount: new_deposit_amount, .. } = own_output.datum
-        let correct_datum_update = new_deposit_amount == deposit_amount + amount
+        // Datum should be updated - handle InlineDatum
+        expect InlineDatum(output_datum_data) = own_output.datum
+        expect new_datum: VaultDatum = output_datum_data
+        let correct_datum_update = new_datum.deposit_amount == deposit_amount + amount
         
         valid_signature && valid_amount && correct_deposit && correct_datum_update
       }
@@ -151,9 +152,10 @@ validator {
         // Must have minimum ADA for fees
         let has_min_ada = quantity_of(own_output.value, #"", #"") >= 2_000_000
         
-        // Datum should be updated
-        expect VaultDatum { deposit_amount: new_deposit_amount, .. } = own_output.datum
-        let correct_datum_update = new_deposit_amount == deposit_amount - amount
+        // Datum should be updated - handle InlineDatum
+        expect InlineDatum(output_datum_data) = own_output.datum
+        expect new_datum: VaultDatum = output_datum_data
+        let correct_datum_update = new_datum.deposit_amount == deposit_amount - amount
         
         valid_signature && valid_amount && il_check && correct_withdrawal && has_min_ada && correct_datum_update
       }
@@ -172,48 +174,42 @@ validator {
         // LP tokens should remain unchanged
         let lp_unchanged = own_input.output.value == own_output.value
         
-        // Only policy should change in datum
-        expect VaultDatum { 
-          policy: updated_policy,
-          owner: same_owner,
-          lp_asset: same_lp_asset,
-          deposit_amount: same_deposit_amount,
-          deposit_time: same_deposit_time,
-        } = own_output.datum
+        // Only policy should change in datum - handle InlineDatum
+        expect InlineDatum(output_datum_data) = own_output.datum
+        expect updated_datum: VaultDatum = output_datum_data
         
         let datum_correct = 
-          updated_policy == new_policy &&
-          same_owner == owner &&
-          same_lp_asset == lp_asset &&
-          same_deposit_amount == deposit_amount &&
-          same_deposit_time == deposit_time
+          updated_datum.policy == new_policy &&
+          updated_datum.owner == owner &&
+          updated_datum.lp_asset == lp_asset &&
+          updated_datum.deposit_amount == deposit_amount &&
+          updated_datum.deposit_time == deposit_time
         
         valid_signature && valid_policy && lp_unchanged && datum_correct
       }
       
       // Emergency exit - withdraw all funds regardless of IL
       EmergencyExit -> {
-        // Must be owner
+        // Must be owner - check signature
         let valid_signature = signed_by_owner
         
-        // Emergency must be enabled
+        // Emergency withdraw must be enabled in policy
         let emergency_enabled = emergency_withdraw
         
-        // Must have LP tokens to withdraw
-        let input_lp_amount = quantity_of(own_input.output.value, lp_asset.policy_id, lp_asset.token_name)
-        let has_lp_tokens = input_lp_amount > 0
+        // Must have some value to withdraw (at least min ADA)
+        let input_ada = quantity_of(own_input.output.value, #"", #"")
+        let has_funds = input_ada > 0
         
-        // The key: vault UTxO must NOT appear in outputs (fully consumed)
-        let vault_consumed = !list.any(
+        // The vault UTxO must be fully consumed (no output back to script)
+        // This ensures all funds are withdrawn, not just partially
+        let script_address = own_input.output.address
+        let vault_fully_consumed = !list.any(
           context.transaction.outputs,
-          fn(output) {
-            // Check if any output goes back to the vault script
-            output.address == own_input.output.address
-          }
+          fn(output) { output.address == script_address }
         )
         
-        // All conditions must be true
-        valid_signature && emergency_enabled && has_lp_tokens && vault_consumed
+        // All conditions must be true for emergency exit
+        valid_signature && emergency_enabled && has_funds && vault_fully_consumed
       }
     }
   }

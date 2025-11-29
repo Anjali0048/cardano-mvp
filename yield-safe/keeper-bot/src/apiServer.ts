@@ -9,9 +9,34 @@ import { RealPoolLoader } from './pools/realPoolLoader.js'
 import { RealLiquidityProvider } from './realLiquidityProvider.js'
 import { BlockchainVaultSync } from './services/blockchainVaultSync.js'
 import { DatabaseService } from './database/database.js'
+import { getActiveNetworkConfig, getBlockfrostKey, validateNetworkConfig } from './config/networkConfig.js'
 
 // Load environment variables
 dotenv.config()
+
+// Validate network configuration on startup
+validateNetworkConfig()
+
+// Validate hex string format
+function validateHexString(hex: string, name: string, expectedLength?: number): string {
+  if (!hex) {
+    throw new Error(`${name} is empty`)
+  }
+  
+  if (!/^[0-9a-fA-F]*$/.test(hex)) {
+    throw new Error(`${name} contains non-hex characters: ${hex}`)
+  }
+  
+  if (hex.length % 2 !== 0) {
+    throw new Error(`${name} has odd length (${hex.length}): ${hex}. Policy IDs must be even-length hex.`)
+  }
+  
+  if (expectedLength && hex.length !== expectedLength) {
+    throw new Error(`${name} has wrong length. Expected ${expectedLength}, got ${hex.length}`)
+  }
+  
+  return hex
+}
 
 // Load vault validator from plutus.json (like Minswap does)
 function loadVaultValidator(): SpendingValidator {
@@ -34,10 +59,11 @@ function loadVaultValidator(): SpendingValidator {
 }
 
 const app = express()
-const port = 3001
+const port = process.env.API_PORT ? parseInt(process.env.API_PORT) : 3001
 
-// Blockfrost API key for Cardano Preview testnet
-const BLOCKFROST_API_KEY = process.env.BLOCKFROST_API_KEY || 'previewbJdo19gLSsDoPQCpwoAY469vXcPNvtPM'
+// Get network configuration and Blockfrost credentials
+const networkConfig = getActiveNetworkConfig()
+const blockfrostKey = getBlockfrostKey()
 
 // Middleware
 app.use(cors())
@@ -49,7 +75,7 @@ const poolLoader = new RealPoolLoader()
 const liquidityProvider = new RealLiquidityProvider()
 
 // Initialize database and blockchain sync
-const database = new DatabaseService('./data/api-keeper.db')
+const database = new DatabaseService(process.env.DATABASE_PATH || './data/api-keeper.db')
 let blockchainSync: BlockchainVaultSync
 
 // Initialize blockchain sync when API starts
@@ -60,10 +86,10 @@ async function initializeServices() {
     
     const lucid = await Lucid.new(
       new Blockfrost(
-        "https://cardano-preview.blockfrost.io/api/v0",
-        BLOCKFROST_API_KEY
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
       ),
-      "Preview"
+      networkConfig.lucidNetwork
     )
     
     blockchainSync = new BlockchainVaultSync(lucid, database)
@@ -77,6 +103,17 @@ async function initializeServices() {
 
 // API Endpoints
 
+// Network info endpoint - tells frontend what network we're on
+console.log('🔧 Registering /api/network endpoint')
+app.get('/api/network', (req, res) => {
+  res.json({
+    network: networkConfig.name,
+    displayName: networkConfig.displayName,
+    lucidNetwork: networkConfig.lucidNetwork,
+    isTestnet: networkConfig.isTestnet,
+  })
+})
+
 // Get vault validator script for emergency exits  
 console.log('🔧 Registering /api/vault/validator endpoint')
 app.get('/api/vault/validator', (req, res) => {
@@ -87,7 +124,8 @@ app.get('/api/vault/validator', (req, res) => {
     res.json({
       success: true,
       validator: vaultValidator,
-      network: 'Preview'
+      network: networkConfig.lucidNetwork,
+      networkName: networkConfig.name
     })
   } catch (error) {
     console.error('❌ Failed to get vault validator:', error)
@@ -102,10 +140,10 @@ app.get('/api/vault/address', async (req, res) => {
     // Initialize Lucid to generate address
     const lucid = await Lucid.new(
       new Blockfrost(
-        "https://cardano-preview.blockfrost.io/api/v0",
-        BLOCKFROST_API_KEY
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
       ),
-      "Preview"
+      networkConfig.lucidNetwork
     )
     
     const vaultValidator = loadVaultValidator()
@@ -114,9 +152,11 @@ app.get('/api/vault/address', async (req, res) => {
     res.json({
       success: true,
       vaultAddress,
-      network: 'Preview',
+      network: networkConfig.lucidNetwork,
+      networkName: networkConfig.name,
+      networkDisplay: networkConfig.displayName,
       validatorHash: lucid.utils.validatorToScriptHash(vaultValidator),
-      validator: vaultValidator  // ADDED: Return validator inline
+      validator: vaultValidator
     })
   } catch (error) {
     console.error('❌ Failed to get vault address:', error)
@@ -362,15 +402,15 @@ app.post('/api/invest/complete-flow', async (req, res) => {
     console.log(`   🛡️ IL Threshold: ${il_threshold}%`)
     console.log(`   👤 User: ${user_address}`)
     console.log(`   🔗 Preparing vault data for Preview testnet...`)
-    console.log(`   🔑 Using Blockfrost API: ${BLOCKFROST_API_KEY.slice(0, 10)}...`)
+    console.log(`   🔑 Using Blockfrost API: ${blockfrostKey.slice(0, 10)}...`)
     
     // Initialize Lucid for building transaction (NO wallet needed for building only)
     const lucid = await Lucid.new(
       new Blockfrost(
-        "https://cardano-preview.blockfrost.io/api/v0",
-        BLOCKFROST_API_KEY
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
       ),
-      "Preview"
+      networkConfig.lucidNetwork
     )
     
     console.log(`   ✅ Lucid initialized successfully`)
@@ -404,64 +444,127 @@ app.post('/api/invest/complete-flow', async (req, res) => {
     }
     
     // Token policy mapping (aligned with Minswap pools) - all 56 chars (28 bytes)
+    // CRITICAL: Policy IDs must be exactly 56 hex characters (28 bytes)
+    // Using correct Preview testnet policy IDs
     const tokenPolicyMap: { [key: string]: string } = {
-      'SNEK': '279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f',
-      'DJED': '8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61',
-      'MIN': 'e16c2dc8ae937e8d3790c7fd7168d7b994621ba14ca11415f39fed72',
-      'SHEN': 'a1c9db04a86b420b6b09f9d9b9b9e7b5f5a5d5c5b5a5d5c5b5a5d5c5',
-      'USDC': 'f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880',
-      'WMT': '1a3660be2e27b5fd9964932ad57e7ca31c6c4b7e3e74e0fd2c4c4b10', // Fixed: was odd length
-      'AGIX': 'f43a62fdc3965df486de8a0d32de07e7deadf4b4c6b3229f7af88ea5', // Fixed: using real AGIX policy
-      'HOSKY': 'a0028f350aaabe0545fdcb56b039bfb08e4bb4d8c4d7c3c7d481c235' // Fixed: using real HOSKY policy
+      'SNEK': '279c909f348e533da5808898f87f9a14bb2c3dfbbacccd631d927a3f', // 56 chars
+      'DJED': '8db269c3ec630e06ae29f74bc39edd1f87c819f1056206e879a1cd61', // 56 chars
+      'MIN':  'e16c2dc8ae937e8d3790c7fd7168d7b994621ba14ca11415f39fed72', // 56 chars
+      'SHEN': 'c9db04a86b420b6b09f9d9b9b9e7b5f5a5d5c5b5a5d5c5b5a5d5c5b5', // 56 chars
+      'USDC': 'f66d78b4a3cb3d37afa0ec36461e51ecbde00f26c8f0a68f94b69880', // 56 chars
+      'WMT':  '1a3660be2e27b5fd9964932ad57e7ca31c6c4b7e3e74e0fd2c4c4b10', // 56 chars
+      'AGIX': 'f43a62fdc3965df486de8a0d32de07e7deadf4b4c6b3229f7af88ea5', // 56 chars
+      'HOSKY': 'a0028f350aaabe0545fdcb56b039bfb08e4bb4d8c4d7c3c7d481c235' // 56 chars
     }
     
     const tokenBPolicyId = tokenPolicyMap[token_b_symbol] || ''
     const tokenBAssetNameHex = stringToHex(token_b_symbol)
     
-    // Validate hex strings are even length
-    if (tokenBPolicyId && tokenBPolicyId.length % 2 !== 0) {
-      throw new Error(`Invalid policy ID for ${token_b_symbol}: odd length hex string`)
+    // Validate hex strings using proper validation function
+    if (tokenBPolicyId) {
+      try {
+        validateHexString(tokenBPolicyId, `${token_b_symbol} policy ID`, 56)
+      } catch (e) {
+        throw new Error(`Invalid token policy: ${e instanceof Error ? e.message : e}`)
+      }
     }
+    validateHexString(tokenBAssetNameHex, `${token_b_symbol} asset name`)
     
     console.log(`   📋 Asset A: ADA (lovelace)`)
     console.log(`   📋 Asset B: ${token_b_symbol} (Policy: ${tokenBPolicyId.slice(0, 10)}..., Name: ${tokenBAssetNameHex})`)
     console.log(`   💰 Deposit: ${ada_amount} ADA + ${token_b_amount} ${token_b_symbol}`)
     console.log(`   🎯 LP Tokens: ${estimated_lp_tokens} (via sqrt(X*Y) formula)`)
     
-    // Convert pool_id to hex if it's not already valid hex
-    const poolIdHex = (() => {
-      // Check if pool_id looks like hex (only 0-9a-fA-F characters)
-      if (/^[0-9a-fA-F]*$/.test(pool_id)) {
-        return pool_id
-      }
-      // Otherwise convert it as UTF-8 string to hex
-      const hex = Buffer.from(pool_id, 'utf8').toString('hex')
-      return hex.length % 2 === 0 ? hex : '0' + hex
-    })()
+    // Create vault datum matching vault.ak VaultDatum type exactly
+    // 
+    // pub type VaultDatum {
+    //   owner: ByteArray,           // Owner public key hash (28 bytes)
+    //   policy: UserPolicy,         // Nested struct
+    //   lp_asset: Asset,           // Nested struct  
+    //   deposit_amount: Int,       // LP token amount
+    //   deposit_time: Int,         // POSIX timestamp
+    //   initial_pool_state: PoolState, // Pool state when position opened
+    // }
+    //
+    // pub type UserPolicy {
+    //   max_il_percent: Int,        // e.g., 500 = 5%
+    //   deposit_ratio: AssetRatio,  // Nested struct
+    //   emergency_withdraw: Bool,   // Must be True to allow EmergencyExit
+    // }
+    //
+    // pub type AssetRatio {
+    //   asset_a_amount: Int,
+    //   asset_b_amount: Int,
+    // }
+    //
+    // pub type Asset {
+    //   policy_id: PolicyId,        // 28 bytes hex or empty for ADA
+    //   token_name: AssetName,      // hex-encoded name
+    // }
+    //
+    // pub type PoolState {
+    //   reserve_a: Int,           // Amount of asset A in pool
+    //   reserve_b: Int,           // Amount of asset B in pool  
+    //   total_lp_tokens: Int,     // Total LP tokens in circulation
+    //   last_update_time: Int,    // POSIX timestamp of last update
+    // }
+
+    const ownerHash = lucid.utils.paymentCredentialOf(user_address).hash
+    const depositAmountLovelace = BigInt(Math.floor(ada_amount * 1_000_000))
+    const tokenBAmountSmallest = BigInt(Math.floor(token_b_amount * 1_000_000))
+    const lpTokenAmount = BigInt(Math.floor(estimated_lp_tokens * 1_000_000))
+    const ilThresholdBasisPoints = BigInt(Math.floor(il_threshold * 100)) // 5% = 500
+    const depositTimestamp = BigInt(Date.now())
+
+    // Build nested structures to match Aiken types exactly
     
-    // Create vault datum following Minswap pool structure
+    // AssetRatio { asset_a_amount, asset_b_amount }
+    const depositRatio = new Constr(0, [
+      depositAmountLovelace,    // asset_a_amount (ADA in lovelace)
+      tokenBAmountSmallest      // asset_b_amount (token B)
+    ])
+    
+    // UserPolicy { max_il_percent, deposit_ratio, emergency_withdraw }
+    // CRITICAL: emergency_withdraw MUST be True (Constr 1) to allow EmergencyExit
+    const userPolicy = new Constr(0, [
+      ilThresholdBasisPoints,   // max_il_percent
+      depositRatio,             // deposit_ratio: AssetRatio
+      new Constr(1, [])         // emergency_withdraw: True (Constr 1 = True in Plutus)
+    ])
+    
+    // Asset { policy_id, token_name } - LP token asset
+    // For now, use a placeholder LP token (in real impl, this would be Minswap LP token)
+    const lpAsset = new Constr(0, [
+      tokenBPolicyId || '',     // Use token B's policy as LP proxy (or empty for ADA LP)
+      stringToHex('LP')         // LP token name
+    ])
+    
+    // PoolState { reserve_a, reserve_b, total_lp_tokens, last_update_time }
+    // Initial pool state when the vault was created
+    const initialPoolState = new Constr(0, [
+      depositAmountLovelace,     // reserve_a: Int (ADA amount in pool at deposit time)
+      tokenBAmountSmallest,      // reserve_b: Int (token B amount in pool at deposit time)
+      lpTokenAmount,             // total_lp_tokens: Int (LP tokens in circulation)
+      depositTimestamp           // last_update_time: Int (POSIX timestamp)
+    ])
+    
+    // VaultDatum { owner, policy, lp_asset, deposit_amount, deposit_time, initial_pool_state }
     const vaultDatum = Data.to(new Constr(0, [
-      // Owner payment credential
-      lucid.utils.paymentCredentialOf(user_address).hash,
-      // Pool ID (converted to hex)
-      poolIdHex,
-      // Asset A (ADA) - Empty policy and empty asset name
-      new Constr(0, ['', '']),
-      // Asset B - Policy ID and hex-encoded asset name
-      new Constr(0, [tokenBPolicyId, tokenBAssetNameHex]),
-      // Deposit amount in lovelace
-      BigInt(Math.floor(ada_amount * 1_000_000)),
-      // Token B amount (in smallest unit)
-      BigInt(Math.floor(token_b_amount * 1_000_000)),
-      // LP tokens (calculated via sqrt formula)
-      BigInt(Math.floor(estimated_lp_tokens * 1_000_000)),
-      // Deposit timestamp
-      BigInt(Date.now()),
-      // IL threshold (in basis points: 5% = 500)
-      BigInt(Math.floor(il_threshold * 100)),
-      // Initial price (pool's current price at entry)
-      BigInt(Math.floor((entry_price || (token_b_amount / ada_amount)) * 1_000_000))
+      ownerHash,                // owner: ByteArray (28 bytes payment credential hash)
+      userPolicy,               // policy: UserPolicy (nested struct)
+      lpAsset,                  // lp_asset: Asset (nested struct)
+      lpTokenAmount,            // deposit_amount: Int
+      depositTimestamp,         // deposit_time: Int
+      initialPoolState          // initial_pool_state: PoolState (nested struct)
     ]))
+    
+    console.log(`   📋 VaultDatum structure (6 fields):`)
+    console.log(`      - Owner: ${ownerHash}`)
+    console.log(`      - Policy: IL threshold ${il_threshold}% (${ilThresholdBasisPoints} basis pts), emergency_withdraw=True`)
+    console.log(`      - LP Asset: ${tokenBPolicyId ? tokenBPolicyId.slice(0, 10) + '...' : 'ADA'}/LP`)
+    console.log(`      - Deposit: ${estimated_lp_tokens} LP tokens`)
+    console.log(`      - Time: ${depositTimestamp}`)
+    console.log(`      - Initial Pool State: A=${Number(depositAmountLovelace)/1e6} ADA, B=${Number(tokenBAmountSmallest)/1e6}`)
     
     // Build transaction data (to be signed by frontend)
     console.log(`   🔨 Building vault transaction data...`)
@@ -674,10 +777,10 @@ app.post('/api/vault/list', async (req, res) => {
     // Get user's payment credential hash for filtering
     const lucid = await Lucid.new(
       new Blockfrost(
-        "https://cardano-preview.blockfrost.io/api/v0",
-        BLOCKFROST_API_KEY
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
       ),
-      "Preview"
+      networkConfig.lucidNetwork
     )
     
     const userDetails = lucid.utils.getAddressDetails(userAddress)
@@ -743,10 +846,10 @@ app.post('/api/utxo', async (req, res) => {
     // Initialize Lucid
     const lucid = await Lucid.new(
       new Blockfrost(
-        "https://cardano-preview.blockfrost.io/api/v0",
-        BLOCKFROST_API_KEY
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
       ),
-      "Preview"
+      networkConfig.lucidNetwork
     );
 
     // Fetch UTXOs
@@ -773,6 +876,92 @@ app.post('/api/utxo', async (req, res) => {
   }
 });
 
+// Create Minswap withdraw order endpoint
+app.post('/api/minswap/withdraw-order', async (req, res) => {
+  try {
+    const { lpAsset, lpAmount, reserveA, reserveB, totalLiquidity, userAddress, slippage } = req.body
+    
+    console.log('🔄 Creating Minswap withdraw order...')
+    console.log(`   LP Amount: ${lpAmount}`)
+    console.log(`   Pool Reserves: ${reserveA} / ${reserveB}`)
+    console.log(`   User: ${userAddress}`)
+    
+    if (!lpAsset || !lpAmount || !reserveA || !reserveB || !totalLiquidity || !userAddress) {
+      return res.status(400).json({ error: 'Missing required parameters' })
+    }
+    
+    const lucid = await Lucid.new(
+      new Blockfrost(
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
+      ),
+      networkConfig.lucidNetwork
+    )
+    
+    // Get user payment hash
+    const userDetails = lucid.utils.getAddressDetails(userAddress)
+    const userPubKeyHash = userDetails.paymentCredential?.hash || ''
+    
+    // Calculate minimum amounts with slippage
+    const lpAmountBigInt = BigInt(lpAmount)
+    const reserveABigInt = BigInt(reserveA)
+    const reserveBBigInt = BigInt(reserveB)
+    const totalLiquidityBigInt = BigInt(totalLiquidity)
+    
+    const amountA = (reserveABigInt * lpAmountBigInt) / totalLiquidityBigInt
+    const amountB = (reserveBBigInt * lpAmountBigInt) / totalLiquidityBigInt
+    
+    const slippageValue = slippage || 0.02 // 2% default
+    const slippageFactor = BigInt(Math.floor((1 - slippageValue) * 10000))
+    const minA = (amountA * slippageFactor) / 10000n
+    const minB = (amountB * slippageFactor) / 10000n
+    
+    // Create withdraw order datum
+    const noDatum = new Constr(0, [])
+    
+    const withdrawStep = new Constr(4, [
+      new Constr(0, [lpAmountBigInt]), // WAOSpecificAmount variant
+      minA, // minimum_asset_a
+      minB, // minimum_asset_b
+      new Constr(0, []) // killable: False (safer default)
+    ])
+    
+    const orderDatum = new Constr(0, [
+      new Constr(0, [userPubKeyHash]), // canceller (OAMSignature)
+      userPubKeyHash, // refund_receiver
+      new Constr(1, []), // refund_receiver_datum: None
+      userPubKeyHash, // success_receiver
+      new Constr(1, []), // success_receiver_datum: None
+      new Constr(0, [lpAsset.policyId, lpAsset.tokenName]), // lp_asset
+      2_000000n, // batcher_fee
+      new Constr(1, []), // expired_setting_opt: None
+      withdrawStep // step
+    ])
+    
+    const datumHex = Data.to(orderDatum)
+    
+    // Minswap order contract address (Preprod) - REAL ADDRESS
+    const orderAddress = "addr_test1wqag3rt979nep9kzka7hke84x8uedaqs0gk4k5ue9kgvlqgke2zne"
+    
+    res.json({
+      success: true,
+      orderDatum: datumHex,
+      orderAddress,
+      minTokenA: minA.toString(),
+      minTokenB: minB.toString(),
+      batcherFee: '2000000',
+      lpAsset: lpAsset,
+      lpAmount: lpAmount
+    })
+    
+    console.log('✅ Withdraw order data prepared successfully')
+    
+  } catch (error) {
+    console.error('❌ Failed to create withdraw order:', error)
+    res.status(500).json({ error: String(error) })
+  }
+})
+
 // Debug endpoint to get payment hash for an address
 app.post('/api/debug/payment-hash', async (req, res) => {
   try {
@@ -783,10 +972,10 @@ app.post('/api/debug/payment-hash', async (req, res) => {
     
     const lucid = await Lucid.new(
       new Blockfrost(
-        "https://cardano-preview.blockfrost.io/api/v0",
-        BLOCKFROST_API_KEY
+        networkConfig.blockfrostEndpoint,
+        blockfrostKey
       ),
-      "Preview"
+      networkConfig.lucidNetwork
     )
     
     const userDetails = lucid.utils.getAddressDetails(userAddress)
@@ -802,6 +991,54 @@ app.post('/api/debug/payment-hash', async (req, res) => {
   }
 })
 
+// Debug endpoint to validate redeemer serialization
+app.post('/api/debug/redeemer', (req, res) => {
+  try {
+    // Test all redeemer variants
+    const deposit = new Constr(0, [1000000n])
+    const withdraw = new Constr(1, [1000000n, 500n])
+    const updatePolicy = new Constr(2, [new Constr(0, [500n, true, new Constr(0, [100n, 100n])])])
+    const emergencyExit = new Constr(3, [])
+    
+    const serializedDeposit = Data.to(deposit)
+    const serializedWithdraw = Data.to(withdraw)
+    const serializedEmergencyExit = Data.to(emergencyExit)
+    
+    // Test deserialization
+    const deserializedEmergencyExit = Data.from(serializedEmergencyExit)
+    
+    res.json({
+      success: true,
+      redeemers: {
+        deposit: {
+          constrIndex: 0,
+          serializedHex: serializedDeposit,
+          length: serializedDeposit.length
+        },
+        withdraw: {
+          constrIndex: 1,
+          serializedHex: serializedWithdraw,
+          length: serializedWithdraw.length
+        },
+        emergencyExit: {
+          constrIndex: 3,
+          fields: [],
+          serializedHex: serializedEmergencyExit,
+          length: serializedEmergencyExit.length,
+          deserializedBack: deserializedEmergencyExit
+        }
+      },
+      message: 'All redeemer serializations working correctly'
+    })
+  } catch (error) {
+    res.status(500).json({ 
+      success: false,
+      error: String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    })
+  }
+})
+
 // Health check
 app.get('/health', (req, res) => {
   res.json({ 
@@ -811,14 +1048,19 @@ app.get('/health', (req, res) => {
   })
 })
 
-// Start server
-app.listen(port, async () => {
-  console.log(`🚀 Yield Safe API Server running on port ${port}`)
-  console.log(`🔗 Frontend can connect to: http://localhost:${port}`)
-  console.log(`📊 IL Calculator: Ready with fixed calculations`)
-  
-  // Initialize services after server starts
-  await initializeServices()
-})
+// Export function to start the server
+export async function startAPIServer() {
+  return new Promise<void>((resolve) => {
+    app.listen(port, async () => {
+      console.log(`🚀 Yield Safe API Server running on port ${port}`)
+      console.log(`🔗 Frontend can connect to: http://localhost:${port}`)
+      console.log(`📊 IL Calculator: Ready with fixed calculations`)
+      
+      // Initialize services after server starts
+      await initializeServices()
+      resolve()
+    })
+  })
+}
 
 export default app

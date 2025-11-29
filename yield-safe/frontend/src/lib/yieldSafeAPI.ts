@@ -1,10 +1,12 @@
 // NEW API Service to connect frontend with our fixed IL calculator
+import { config } from './apiConfig'
+
 export class YieldSafeAPI {
   private baseUrl: string
   
   constructor() {
     // This will connect to our keeper bot service
-    this.baseUrl = 'http://localhost:3001' // Keeper bot will run on port 3001
+    this.baseUrl = config.api.baseUrl
   }
 
   // Get real IL data for a vault
@@ -16,7 +18,7 @@ export class YieldSafeAPI {
     dataSource: string
   }> {
     try {
-      const response = await fetch(`${this.baseUrl}/api/vault/il-status`, {
+      const response = await fetch(config.api.endpoints.ilStatus, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

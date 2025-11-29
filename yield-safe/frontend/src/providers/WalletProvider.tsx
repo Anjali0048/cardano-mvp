@@ -25,6 +25,7 @@ interface WalletContextType {
   connectWallet: () => Promise<void>
   disconnectWallet: () => void
   walletName: string | null
+  ensureWalletSelected: () => Promise<void>
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
@@ -48,13 +49,31 @@ export function WalletProvider({ children }: WalletProviderProps) {
 
   const initializeLucid = async () => {
     try {
-      // Initialize Lucid with Blockfrost provider for Preview testnet
+      // Get network configuration from backend API
+      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+      let network = 'Preview'
+      
+      try {
+        const networkResponse = await fetch(`${apiUrl}/api/network`)
+        if (networkResponse.ok) {
+          const networkData = await networkResponse.json()
+          network = networkData.lucidNetwork || 'Preview'
+          console.log(`✅ Network from API: ${networkData.displayName}`)
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not fetch network from API, using default:', error)
+      }
+
+      // Initialize Lucid with Blockfrost provider
+      const blockfrostEndpoint = import.meta.env.VITE_BLOCKFROST_ENDPOINT || 'https://cardano-preview.blockfrost.io/api/v0'
+      const blockfrostKey = import.meta.env.VITE_BLOCKFROST_KEY || 'previewbJdo19gLSsDoPQCpwoAY469vXcPNvtPM'
+      
       const lucidInstance = await Lucid.new(
-        new Blockfrost('https://cardano-preview.blockfrost.io/api/v0', 'previewbJdo19gLSsDoPQCpwoAY469vXcPNvtPM'),
-        'Preview'
+        new Blockfrost(blockfrostEndpoint, blockfrostKey),
+        network as 'Preview' | 'Mainnet'
       )
       setLucid(lucidInstance)
-      console.log('✅ Lucid initialized with Preview testnet')
+      console.log(`✅ Lucid initialized with ${network} testnet`)
     } catch (error) {
       console.error('❌ Failed to initialize Lucid:', error)
     }
@@ -189,6 +208,23 @@ export function WalletProvider({ children }: WalletProviderProps) {
     console.log('👋 Wallet disconnected')
   }
 
+  const ensureWalletSelected = async () => {
+    if (!lucid || !wallet || !isConnected) {
+      throw new Error('Wallet not connected. Please connect your wallet first.')
+    }
+
+    // Re-select the wallet in Lucid to ensure it's properly attached
+    lucid.selectWallet(wallet)
+    
+    if (!lucid.wallet) {
+      console.warn('⚠️ Wallet was not properly reselected in Lucid, attempting to reconnect...')
+      await connectWallet()
+      return
+    }
+
+    console.log('✅ Wallet verified and selected in Lucid')
+  }
+
   const contextValue: WalletContextType = {
     lucid,
     wallet,
@@ -197,7 +233,8 @@ export function WalletProvider({ children }: WalletProviderProps) {
     isLoading,
     connectWallet,
     disconnectWallet,
-    walletName
+    walletName,
+    ensureWalletSelected
   }
 
   return (
