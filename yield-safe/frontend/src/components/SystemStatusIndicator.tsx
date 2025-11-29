@@ -4,6 +4,7 @@ interface SystemStatus {
   factory: boolean;
   api: boolean;
   blockchain: boolean;
+  charli3: boolean;
   lastUpdate: string;
 }
 
@@ -12,6 +13,7 @@ export function SystemStatusIndicator() {
     factory: false,
     api: false,
     blockchain: false,
+    charli3: false,
     lastUpdate: new Date().toISOString()
   })
 
@@ -28,10 +30,23 @@ export function SystemStatusIndicator() {
         const factoryResponse = await fetch('http://localhost:3001/api/factory/info')
         const factoryHealthy = factoryResponse.ok
 
+        // Check Charli3 integration
+        let charli3Healthy = false
+        try {
+          const charli3Response = await fetch('http://localhost:3001/api/pools/list')
+          if (charli3Response.ok) {
+            const data = await charli3Response.json()
+            charli3Healthy = data.source === 'charli3' && data.count > 0
+          }
+        } catch (e) {
+          console.log('Charli3 check failed')
+        }
+
         setStatus({
           api: apiHealthy,
           factory: factoryHealthy,
-          blockchain: factoryHealthy, // If factory works, blockchain is accessible
+          blockchain: factoryHealthy,
+          charli3: charli3Healthy,
           lastUpdate: new Date().toISOString()
         })
         setIsOnline(true)
@@ -87,6 +102,13 @@ export function SystemStatusIndicator() {
           <span className="text-purple-300">Cardano Testnet</span>
           <span className={getStatusColor(status.blockchain)}>
             {getStatusIcon(status.blockchain)} {status.blockchain ? 'Synced' : 'Offline'}
+          </span>
+        </div>
+        
+        <div className="flex justify-between items-center">
+          <span className="text-purple-300">Charli3 Oracle</span>
+          <span className={getStatusColor(status.charli3)}>
+            {getStatusIcon(status.charli3)} {status.charli3 ? 'Active' : 'Inactive'}
           </span>
         </div>
       </div>

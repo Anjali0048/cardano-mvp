@@ -1,5 +1,7 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { enhancedAPI } from '../lib/enhancedAPI'
+import toast from 'react-hot-toast'
 
 interface Vault {
   id: string
@@ -19,6 +21,22 @@ interface VaultCardProps {
 }
 
 export function VaultCard({ vault }: VaultCardProps) {
+  const [aiPrediction, setAiPrediction] = useState<any>(null)
+  const [loadingPrediction, setLoadingPrediction] = useState(false)
+
+  const loadAIPrediction = async () => {
+    setLoadingPrediction(true)
+    try {
+      const prediction = await enhancedAPI.predictPrice(vault.tokenB, [24, 168])
+      setAiPrediction(prediction)
+      toast.success('AI prediction loaded')
+    } catch (err) {
+      toast.error('Failed to load prediction')
+    } finally {
+      setLoadingPrediction(false)
+    }
+  }
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'healthy': return 'text-green-400 bg-green-400/10 border-green-400/20'
@@ -100,6 +118,32 @@ export function VaultCard({ vault }: VaultCardProps) {
           ></div>
         </div>
       </div>
+
+      {/* AI Prediction Panel */}
+      {!aiPrediction ? (
+        <button
+          onClick={loadAIPrediction}
+          disabled={loadingPrediction}
+          className="w-full mb-4 py-2 px-3 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 rounded text-sm text-purple-300 disabled:opacity-50"
+        >
+          {loadingPrediction ? '⏳ Loading AI Prediction...' : '🤖 Get AI Price Prediction'}
+        </button>
+      ) : (
+        <div className="mb-4 p-3 bg-purple-900/20 border border-purple-500/30 rounded">
+          <div className="text-xs text-purple-300 mb-2">🤖 AI Prediction</div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {aiPrediction.predictions.slice(0, 2).map((p: any) => (
+              <div key={p.timeframe} className="bg-gray-800/50 rounded p-2">
+                <div className="text-gray-400">{p.timeframe}</div>
+                <div className="text-white font-mono">${p.predictedPrice.toFixed(6)}</div>
+                <div className={p.changePercent >= 0 ? 'text-green-400' : 'text-red-400'}>
+                  {p.changePercent >= 0 ? '↗' : '↘'} {Math.abs(p.changePercent).toFixed(1)}%
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center justify-between text-sm text-gray-400">
         <span>Last updated {formatTimeAgo(vault.lastUpdate)}</span>

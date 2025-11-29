@@ -14,6 +14,12 @@ interface PoolData {
     address: string;
     factoryContract: string;
   };
+  // Enhanced Charli3 fields
+  riskScore?: number;
+  volatility7d?: number;
+  priceChange7d?: number;
+  volume24h?: number;
+  currentPrice?: number;
 }
 
 interface RealPoolCardProps {
@@ -56,6 +62,28 @@ export function RealPoolCard({ pool, onClick }: RealPoolCardProps) {
         </div>
       </div>
 
+      {/* Charli3 Risk & Volatility Metrics */}
+      {(pool.riskScore !== undefined || pool.volatility7d !== undefined) && (
+        <div className="grid grid-cols-2 gap-4 mb-4">
+          {pool.riskScore !== undefined && (
+            <div className="bg-slate-700/30 p-3 rounded-lg">
+              <div className="text-purple-300 text-sm flex items-center gap-1">
+                📊 Risk Score
+              </div>
+              <div className={`font-semibold ${pool.riskScore < 30 ? 'text-green-400' : pool.riskScore < 50 ? 'text-yellow-400' : pool.riskScore < 70 ? 'text-orange-400' : 'text-red-400'}`}>
+                {pool.riskScore.toFixed(1)} / 100
+              </div>
+            </div>
+          )}
+          {pool.volatility7d !== undefined && (
+            <div className="bg-slate-700/30 p-3 rounded-lg">
+              <div className="text-purple-300 text-sm">7d Volatility</div>
+              <div className="text-white font-semibold">{(pool.volatility7d * 100).toFixed(2)}%</div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* IL Protection Status */}
       <div className="bg-slate-700/20 p-3 rounded-lg mb-4">
         <div className="flex justify-between items-center">
@@ -78,13 +106,24 @@ export function RealPoolCard({ pool, onClick }: RealPoolCardProps) {
             <span className="text-purple-300">Network:</span>
             <span className="text-white ml-2">{pool.blockchain.network}</span>
           </div>
-          <div className="text-blue-400">
-            ⚡ Live Data
+          <div className="flex items-center gap-2">
+            <div className="text-blue-400">⚡ Live Data</div>
+            {(pool.riskScore !== undefined || pool.volatility7d !== undefined) && (
+              <div className="text-green-400 text-xs">📡 Charli3</div>
+            )}
           </div>
         </div>
         <div className="text-purple-300 text-xs mt-1 font-mono truncate">
           {pool.blockchain.address}
         </div>
+        {pool.priceChange7d !== undefined && (
+          <div className="text-xs mt-1">
+            <span className="text-purple-300">7d Change: </span>
+            <span className={pool.priceChange7d >= 0 ? 'text-green-400' : 'text-red-400'}>
+              {pool.priceChange7d >= 0 ? '+' : ''}{pool.priceChange7d.toFixed(2)}%
+            </span>
+          </div>
+        )}
       </div>
     </div>
   )

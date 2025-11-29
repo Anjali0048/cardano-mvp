@@ -68,19 +68,26 @@ export function VaultManagement() {
       console.log(`✅ Found ${realVaults.length} vaults from blockchain`)
       
       // Transform RealVaultData to VaultInfo for display
-      const transformedVaults: VaultInfo[] = realVaults.map(vault => ({
-        vaultId: vault.vaultId,
-        lpTokens: vault.lpTokens, // Use actual LP tokens from vault datum
-        depositAmount: vault.depositAmount,
-        tokenPair: `${vault.tokenA}/${vault.tokenB}`,
-        ilPercentage: vault.currentIL || 0,
-        status: vault.shouldTriggerProtection ? 'Protected' : 'Active',
-        entryPrice: vault.entryPrice,
-        currentPrice: vault.currentPrice,
-        createdAt: vault.createdAt,
-        ilThreshold: vault.ilThreshold,
-        emergencyWithdraw: true
-      }))
+      const transformedVaults: VaultInfo[] = realVaults.map(vault => {
+        // Use actual token names from vault - no normalization needed
+        // TOKEN was a placeholder used in old test vaults
+        const tokenA = vault.tokenA || 'ADA'
+        const tokenB = vault.tokenB || 'Unknown'
+        
+        return {
+          vaultId: vault.vaultId,
+          lpTokens: vault.lpTokens, // Use actual LP tokens from vault datum
+          depositAmount: vault.depositAmount,
+          tokenPair: `${tokenA}/${tokenB}`,
+          ilPercentage: vault.currentIL || 0,
+          status: vault.shouldTriggerProtection ? 'Protected' : 'Active',
+          entryPrice: vault.entryPrice,
+          currentPrice: vault.currentPrice,
+          createdAt: vault.createdAt,
+          ilThreshold: vault.ilThreshold,
+          emergencyWithdraw: true
+        }
+      })
       
       setVaults(transformedVaults)
       

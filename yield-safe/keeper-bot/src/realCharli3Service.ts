@@ -20,9 +20,53 @@ interface Charli3OHLCV {
 class RealCharli3Service {
   private apiKey: string;
   private baseUrl = 'https://api.charli3.io';
+  private maxRetries: number = 3;
+  private initialDelayMs: number = 1000;
 
   constructor(apiKey: string) {
     this.apiKey = apiKey;
+  }
+
+  /**
+   * Retry logic with exponential backoff for network failures
+   */
+  private async retryWithBackoff<T>(
+    fn: () => Promise<T>,
+    operationName: string,
+    maxRetries: number = this.maxRetries
+  ): Promise<T> {
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error as Error;
+        const isNetworkError =
+          (error instanceof Error &&
+            (error.message.includes('ECONNREFUSED') ||
+              error.message.includes('ECONNRESET') ||
+              error.message.includes('ETIMEDOUT') ||
+              error.message.includes('socket hang up') ||
+              error.message.includes('timeout') ||
+              error.message.includes('CONNECT_TIMEOUT'))) ||
+          (error as any)?.code === 'ECONNREFUSED' ||
+          (error as any)?.code === 'ECONNRESET' ||
+          (error as any)?.code === 'ETIMEDOUT';
+
+        if (!isNetworkError || attempt === maxRetries) {
+          throw error;
+        }
+
+        const delayMs = this.initialDelayMs * Math.pow(2, attempt - 1);
+        console.log(
+          `   ⚠️  ${operationName} attempt ${attempt}/${maxRetries} failed, retrying in ${delayMs}ms...`
+        );
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+
+    throw lastError || new Error(`${operationName} failed after ${maxRetries} attempts`);
   }
 
   /**
@@ -34,24 +78,29 @@ class RealCharli3Service {
       console.log(`\n📊 Fetching current price for ${symbol}...`);
 
       // Symbol format: "ADA/SNEK" or "SNEK/DJED"
-      const response = await axios.get(`${this.baseUrl}/tokens/current`, {
-        params: {
-          symbols: symbol
-        },
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Accept': 'application/json'
-        },
-        timeout: 5000
-      });
+      const price = await this.retryWithBackoff(
+        async () => {
+          const response = await axios.get(`${this.baseUrl}/tokens/current`, {
+            params: {
+              symbols: symbol
+            },
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Accept': 'application/json'
+            },
+            timeout: 5000
+          });
 
-      const data = response.data;
+          const data = response.data;
 
-      // Handle response format
-      const price = data[symbol]?.price || 
-                   data.price || 
-                   data[0]?.price ||
-                   1.5; // Fallback
+          // Handle response format
+          return data[symbol]?.price || 
+                         data.price || 
+                         data[0]?.price ||
+                         1.5; // Fallback
+        },
+        `Get price for ${symbol}`
+      );
 
       console.log(`   Current price: ${price}`);
       return price;
@@ -80,32 +129,39 @@ class RealCharli3Service {
       const fromTime = from || now - 24 * 3600;
       const toTime = to || now;
 
-      const response = await axios.get(`${this.baseUrl}/history`, {
-        params: {
-          symbols: symbol,
-          resolution: resolution,
-          from: fromTime,
-          to: toTime
+      const candles = await this.retryWithBackoff(
+        async () => {
+          const response = await axios.get(`${this.baseUrl}/history`, {
+            params: {
+              symbols: symbol,
+              resolution: resolution,
+              from: fromTime,
+              to: toTime
+            },
+            headers: {
+              Authorization: `Bearer ${this.apiKey}`,
+              'Accept': 'application/json'
+            },
+            timeout: 5000
+          });
+
+          const data = response.data;
+
+          // Extract candles from response
+          let result: Charli3OHLCV[] = [];
+
+          if (Array.isArray(data)) {
+            result = data;
+          } else if (data[symbol]) {
+            result = data[symbol];
+          } else if (data.candles) {
+            result = data.candles;
+          }
+
+          return result;
         },
-        headers: {
-          Authorization: `Bearer ${this.apiKey}`,
-          'Accept': 'application/json'
-        },
-        timeout: 5000
-      });
-
-      const data = response.data;
-
-      // Extract candles from response
-      let candles: Charli3OHLCV[] = [];
-
-      if (Array.isArray(data)) {
-        candles = data;
-      } else if (data[symbol]) {
-        candles = data[symbol];
-      } else if (data.candles) {
-        candles = data.candles;
-      }
+        `Get historical data for ${symbol}`
+      );
 
       console.log(`   Found ${candles.length} candles`);
       if (candles.length > 0) {

@@ -61,6 +61,16 @@ export function Layout({ children }: LayoutProps) {
                   >
                     🚨 Manage Vaults
                   </Link>
+                  <Link
+                    to="/ai-agent"
+                    className={`px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${
+                      isActive('/ai-agent') 
+                        ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white' 
+                        : 'text-gray-300 hover:text-white hover:bg-purple-700'
+                    }`}
+                  >
+                    🤖 AI Agent
+                  </Link>
                 </div>
               </div>
             </div>

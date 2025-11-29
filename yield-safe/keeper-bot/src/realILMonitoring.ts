@@ -12,7 +12,7 @@ async function startRealILMonitoring() {
   console.log('🚀 Starting Yield Safe with REAL IL Detection & Protection')
   console.log('📡 Network: Cardano Preview Testnet')
   console.log('🏛️  Contract:', VAULT_CONTRACT_ADDRESS)
-  console.log('🔗 Price Oracle: Charli3 + CoinGecko fallback')
+  console.log('🔗 Price Oracle: Charli3 ONLY (no CoinGecko)')
   
   try {
     // Initialize Lucid with Blockfrost

@@ -1,43 +1,81 @@
+# ===================================
 # Dependencies
+# ===================================
 node_modules/
 */node_modules/
 **/node_modules/
+./venv
+.venv/
+venv/
+env/
+.env/
+__pycache__/
+*.pyc
 
+# ===================================
 # Build outputs
+# ===================================
 dist/
 build/
 */dist/
 */build/
 **/dist/
 **/build/
+*.js.map
+*.d.ts
 
+# ===================================
+# Environment variables (IMPORTANT!)
+# ===================================
+.env
+.env.*
+!.env.example
+*.env
+**/.env
+
+# ===================================
+# API Keys & Secrets (NEVER COMMIT)
+# ===================================
+**/secrets/
+*.pem
+*.key
+*.cert
+wallet.json
+**/wallet*.json
+seed_phrase.txt
+**/seed*.txt
+
+# ===================================
 # Logs
+# ===================================
 logs/
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
 
+# ===================================
 # Runtime data
+# ===================================
 pids
 *.pid
 *.seed
 *.pid.lock
 
-# Environment variables
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
+# ===================================
 # IDE files
+# ===================================
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
 
+# ===================================
 # OS generated files
+# ===================================
 .DS_Store
 .DS_Store?
 ._*
@@ -46,29 +84,60 @@ pids
 ehthumbs.db
 Thumbs.db
 
-# Aiken specific
+# ===================================
+# Aiken / Cardano specific
+# ===================================
 # Keep plutus.json but ignore other build artifacts
 contracts/build/packages/
 */contracts/build/packages/
 **/contracts/build/packages/
 
-# Lock files (keep package-lock.json but ignore others)
+# Cardano node files
+db/
+node.socket
+*.socket
+
+# ===================================
+# Lock files
+# ===================================
 yarn.lock
 pnpm-lock.yaml
+# Keep package-lock.json for reproducible builds
 
+# ===================================
 # Temporary files
+# ===================================
 *.tmp
 *.temp
 /tmp/
+.temp/
+.cache/
 
+# ===================================
 # Database files
+# ===================================
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
 
-# Coverage directory used by tools like istanbul
+# ===================================
+# Test & Coverage
+# ===================================
 coverage/
+.nyc_output/
+*.lcov
+test-results/
+junit.xml
 
+# ===================================
+# TypeScript
+# ===================================
+*.tsbuildinfo
+
+# ===================================
+# Misc
+# ===================================
 # Compiled binary addons
 build/Release
 
@@ -88,7 +157,6 @@ jspm_packages/
 .yarn-integrity
 
 # parcel-bundler cache
-.cache
 .parcel-cache
 
 # next.js build output
@@ -102,3 +170,43 @@ jspm_packages/
 
 # Serverless directories
 .serverless
+
+# ===================================
+# YieldSafe specific
+# ===================================
+# Keeper bot data
+yield-safe/keeper-bot/data/
+yield-safe/keeper-bot/*.db
+
+# Frontend build
+yield-safe/frontend/dist/
+
+# Contract builds (keep plutus.json)
+yield-safe/contracts/build/
+!yield-safe/contracts/plutus.json
+
+# Monitoring logs
+yield-safe/keeper-bot/logs/
+
+# Cache files (but keep the structure)
+cache/
+!cache/.gitkeep
+yield-safe/keeper-bot/cache/*.json
+yield-safe/keeper-bot/cache/*.txt
+yield-safe/frontend/public/cache/*.json
+
+# Deployment artifacts
+deployment/
+yield-safe/deployment/deployment_info.json
+yield-safe/deployment/script_hash.txt
+yield-safe/deployment/vault_address.txt
+
+# MinSwap DEX build artifacts
+minswap-dex-v2/dist/
+minswap-dex-v2/node_modules/
+minswap-dex-v2/coverage/
+
+# Test and development data
+*.test.json
+test-data/
+dev-wallets/
