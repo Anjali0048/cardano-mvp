@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { DemoRebalance } from './DemoRebalance'
+import { AIDelegationModal } from './AIDelegationModal'
 import { enhancedAPI } from '../lib/enhancedAPI'
 import toast from 'react-hot-toast'
 
@@ -23,11 +25,13 @@ interface VaultCardProps {
 export function VaultCard({ vault }: VaultCardProps) {
   const [aiPrediction, setAiPrediction] = useState<any>(null)
   const [loadingPrediction, setLoadingPrediction] = useState(false)
+  const [showDemoRebalance, setShowDemoRebalance] = useState(false)
+  const [showAIDelegation, setShowAIDelegation] = useState(false)
 
   const loadAIPrediction = async () => {
     setLoadingPrediction(true)
     try {
-      const prediction = await enhancedAPI.predictPrice(vault.tokenB, [24, 168])
+      const prediction = await enhancedAPI.predictPrice(vault.tokenB)
       setAiPrediction(prediction)
       toast.success('AI prediction loaded')
     } catch (err) {
@@ -145,15 +149,70 @@ export function VaultCard({ vault }: VaultCardProps) {
         </div>
       )}
 
+      {/* AI Action Buttons */}
+      <div className="space-y-2 mb-4">
+        {/* Run Sample Demo */}
+        {vault.ilPercentage > vault.ilThreshold * 0.5 && (
+          <button
+            onClick={() => setShowDemoRebalance(true)}
+            className="w-full py-3 px-4 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 rounded-lg text-white font-medium transition-all duration-200 transform hover:scale-105"
+          >
+            <div className="flex items-center justify-center space-x-2">
+              <span className="text-lg">🎯</span>
+              <span>Run Sample Demo</span>
+              <span className="text-xs bg-white/20 px-2 py-1 rounded">Auto</span>
+            </div>
+            <div className="text-xs text-green-200 mt-1">
+              See AI rebalancing in action - zero configuration
+            </div>
+          </button>
+        )}
+
+        {/* AI Delegation */}
+        <button
+          onClick={() => setShowAIDelegation(true)}
+          className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 rounded-lg text-white font-medium transition-all duration-200 transform hover:scale-105"
+        >
+          <div className="flex items-center justify-center space-x-2">
+            <span className="text-lg">🤝</span>
+            <span>Delegate to AI</span>
+            <span className="text-xs bg-white/20 px-2 py-1 rounded">Auto</span>
+          </div>
+          <div className="text-xs text-indigo-200 mt-1">
+            Autonomous management with Masumi jobs
+          </div>
+        </button>
+      </div>
+
       <div className="flex items-center justify-between text-sm text-gray-400">
         <span>Last updated {formatTimeAgo(vault.lastUpdate)}</span>
         <Link 
           to={`/vault/${vault.id}`}
-          className="text-blue-400 hover:text-blue-300 font-medium"
+          className="text-blue-400 hover:text-blue-300 text-sm"
         >
           View Details →
         </Link>
       </div>
+
+      {/* Demo Rebalance Modal */}
+      <DemoRebalance
+        isOpen={showDemoRebalance}
+        onClose={() => setShowDemoRebalance(false)}
+      />
+
+      {/* AI Delegation Modal */}
+      <AIDelegationModal
+        isOpen={showAIDelegation}
+        onClose={() => setShowAIDelegation(false)}
+        vault={{
+          id: vault.id,
+          tokenA: vault.tokenA,
+          tokenB: vault.tokenB,
+          depositAmount: vault.depositAmount,
+          ilPercentage: vault.ilPercentage,
+          ilThreshold: vault.ilThreshold
+        }}
+      />
     </div>
   )
 }

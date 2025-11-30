@@ -18,50 +18,53 @@ export function Dashboard() {
   const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    if (isConnected && address) {
+    if (isConnected && address && lucid) {
       fetchRealData()
       // Refresh every 10 seconds to show updated vaults
       const interval = setInterval(fetchRealData, 10000)
       return () => clearInterval(interval)
     }
-  }, [isConnected, address])
+  }, [isConnected, address, lucid])
 
   const fetchRealData = async () => {
-    if (!address) return
+    if (!address || !lucid) return
     
     setLoading(true)
     try {
-      // Call backend API to get user's vaults (faster than blockchain query)
-      const response = await fetch('http://localhost:3001/api/vault/list', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userAddress: address })
-      })
+      // Use RealVaultService to fetch REAL data from blockchain (same as VaultManagement)
+      console.log('🔍 Dashboard: Fetching REAL vaults from blockchain...')
       
-      if (!response.ok) {
-        throw new Error(`Backend error: ${response.status}`)
+      // Get vault address first
+      const addressResponse = await fetch('http://localhost:3001/api/vault/address')
+      if (!addressResponse.ok) {
+        throw new Error(`Failed to get vault address: ${addressResponse.status}`)
       }
+      const { vaultAddress } = await addressResponse.json()
       
-      const data = await response.json()
-      console.log(`📊 Dashboard: Found ${data.vaults?.length || 0} real vaults for address ${address.slice(0, 20)}...`)
-      console.log(`📊 Backend returned vaults:`, data.vaults)
+      // Use RealVaultService to get actual blockchain data
+      const vaultService = new RealVaultService(lucid!, vaultAddress)
+      const realVaults = await vaultService.getUserVaults(address)
       
-      // Transform backend vault format to RealVaultData
-      const transformedVaults: RealVaultData[] = (data.vaults || []).map((vault: any) => ({
-        utxo: null,
-        vaultId: vault.vaultId || `vault-${Date.now()}`,
-        owner: vault.owner || '',
-        poolId: vault.poolId || vault.tokenPair?.split('/')[1] || '',
-        tokenA: vault.tokenPair?.split('/')[0] || 'ADA',
-        tokenB: vault.tokenPair?.split('/')[1] || '',
-        depositAmount: vault.depositAmount || 0,
-        entryPrice: vault.entryPrice || 0,
-        createdAt: vault.createdAt || Date.now(),
-        ilThreshold: vault.ilThreshold || 10,
-        status: (vault.ilPercentage || 0) > (vault.ilThreshold || 10) ? 'protected' : 'healthy',
-        currentIL: vault.ilPercentage || 0,
+      console.log(`📊 Dashboard: Found ${realVaults.length} REAL vaults from blockchain for address ${address.slice(0, 20)}...`)
+      console.log(`📊 Real vault data:`, realVaults)
+      
+      // Convert RealVaultData directly to our expected format
+      const transformedVaults: RealVaultData[] = realVaults.map((vault: any) => ({
+        utxo: vault.utxo,
+        vaultId: vault.vaultId,
+        owner: vault.owner,
+        poolId: vault.poolId,
+        tokenA: vault.tokenA,
+        tokenB: vault.tokenB,
+        depositAmount: vault.depositAmount,
+        lpTokens: vault.lpTokens || 0, // Add missing lpTokens field
+        entryPrice: vault.entryPrice,
+        createdAt: vault.createdAt,
+        ilThreshold: vault.ilThreshold, // Use REAL threshold from blockchain
+        status: vault.status, // Use REAL status from blockchain IL calculation
+        currentIL: vault.currentIL || 0, // Use REAL IL from blockchain
         currentPrice: vault.currentPrice || vault.entryPrice,
-        shouldTriggerProtection: (vault.ilPercentage || 0) > (vault.ilThreshold || 10)
+        shouldTriggerProtection: vault.shouldTriggerProtection || false
       }))
       
       setRealVaults(transformedVaults)

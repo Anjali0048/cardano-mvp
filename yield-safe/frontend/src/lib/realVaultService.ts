@@ -285,13 +285,14 @@ export class RealVaultService {
                                 ilData.shouldTriggerProtection;
 
                             // Update status based on real IL
-                            if (ilData.shouldTriggerProtection) {
-                                vaultData.status = "protected";
-                            } else if (ilData.ilPercentage > 1.0) {
-                                vaultData.status = "warning";
-                            } else {
-                                vaultData.status = "healthy";
-                            }
+                           if (ilData.shouldTriggerProtection) {
+    vaultData.status = "protected";
+} else if (ilData.ilPercentage >= vaultData.ilThreshold * 0.6) { // e.g., 60% of threshold
+    vaultData.status = "warning";
+} else {
+    vaultData.status = "healthy";
+}
+
 
                             console.log(
                                 `✅ Vault ${vaultData.vaultId}: ${ilData.ilPercentage.toFixed(3)}% IL`,
