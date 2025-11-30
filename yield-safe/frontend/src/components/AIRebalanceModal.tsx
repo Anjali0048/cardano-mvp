@@ -44,9 +44,8 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
 
   const startAIAnalysis = async () => {
     setLoading(true)
-    
+
     try {
-      // Call backend AI analysis API
       const response = await fetch('http://localhost:3001/api/ai/rebalance-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -58,15 +57,14 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
           depositAmount: vault.depositAmount
         })
       })
-      
+
       if (!response.ok) {
         throw new Error(`AI analysis failed: ${response.status}`)
       }
-      
+
       const data = await response.json()
       console.log('🤖 AI Analysis Result:', data)
-      
-      // Transform backend response to our format
+
       const transformedRecommendations: PoolRecommendation[] = data.analysis.recommendations.map((rec: any) => ({
         fromPool: rec.fromPool,
         toPool: rec.toPool,
@@ -75,13 +73,12 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
         riskScore: rec.riskScore,
         reason: rec.reason
       }))
-      
+
       setRecommendations(transformedRecommendations)
       setStep('recommendations')
-      
+
     } catch (error) {
       console.error('AI Analysis failed:', error)
-      // Fallback to mock recommendations if API fails
       const mockRecommendations: PoolRecommendation[] = [
         {
           fromPool: `${vault.tokenA}/${vault.tokenB}`,
@@ -103,7 +100,7 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
       setRecommendations(mockRecommendations)
       setStep('recommendations')
     }
-    
+
     setLoading(false)
   }
 
@@ -114,35 +111,37 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
 
   const signRebalanceTransaction = async () => {
     if (!lucid || !selectedRecommendation) return
-    
+
     setLoading(true)
-    
+
     try {
-      // Create a dummy transaction for user to sign
       const tx = lucid
         .newTx()
-        .payToAddress(address!, { lovelace: 1000000n }) // Send 1 ADA to self as dummy
+        .payToAddress(address!, { lovelace: 1000000n }) // dummy
         .attachMetadata(674, {
-          msg: [`AI Rebalance: ${vault.id}`, `From: ${selectedRecommendation.fromPool}`, `To: ${selectedRecommendation.toPool}`, `Amount: ${selectedRecommendation.percentage}%`]
+          msg: [
+            `AI Rebalance: ${vault.id}`,
+            `From: ${selectedRecommendation.fromPool}`,
+            `To: ${selectedRecommendation.toPool}`,
+            `Amount: ${selectedRecommendation.percentage}%`
+          ]
         })
-      
+
       const completeTx = await tx.complete()
       const signedTx = await completeTx.sign().complete()
       const txHashResult = await signedTx.submit()
-      
+
       console.log('🤖 AI Rebalance transaction signed:', txHashResult)
       setTxHash(txHashResult)
       setStep('shifting')
-      
-      // Show success toast
+
       showToast('🤖 AI Rebalancing transaction submitted successfully!', 'success')
-      
-      // Start pool shifting animation
+
       setTimeout(() => {
         setStep('complete')
         showToast(`✨ Portfolio optimized! IL reduced to ${selectedRecommendation.expectedIL}%`, 'success')
       }, 4000)
-      
+
     } catch (error) {
       console.error('Failed to sign rebalance transaction:', error)
       showToast('❌ Transaction cancelled or failed', 'error')
@@ -168,10 +167,9 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
     <div>
       <h3 className="text-lg font-semibold text-white mb-4">AI Recommendations</h3>
       <p className="text-gray-400 mb-6">Based on current market conditions and your IL threshold of {vault.ilThreshold}%</p>
-      
       <div className="space-y-4">
         {recommendations.map((rec, index) => (
-          <div 
+          <div
             key={index}
             className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 cursor-pointer hover:border-blue-500 transition-colors"
             onClick={() => selectRecommendation(rec)}
@@ -212,7 +210,6 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
           <p><span className="text-gray-400">Expected IL:</span> {selectedRecommendation?.expectedIL}%</p>
         </div>
       </div>
-      
       <button
         onClick={signRebalanceTransaction}
         disabled={loading}
@@ -226,44 +223,41 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
 
   const renderShiftingStep = () => (
     <div className="text-center py-8">
-      <div className="relative mb-6">
-        <div className="flex items-center justify-center space-x-8">
-          <div className="text-center">
-            <div className="bg-red-500/20 border-2 border-red-500 rounded-lg p-4 w-24 h-24 flex items-center justify-center">
-              <span className="text-white font-bold text-sm">{vault.tokenA}/{vault.tokenB}</span>
-            </div>
-            <p className="text-xs text-gray-400 mt-2">{selectedRecommendation?.percentage}% Moving</p>
+      <div className="relative mb-6 flex items-center justify-center space-x-8">
+        <div className="text-center">
+          <div className="bg-red-500/20 border-2 border-red-500 rounded-lg p-4 w-24 h-24 flex items-center justify-center animate-pulse">
+            <span className="text-white font-bold text-sm">{vault.tokenA}/{vault.tokenB}</span>
           </div>
-          
-          <div className="flex-1 relative">
-            <div className="h-1 bg-gray-700 rounded"></div>
-            <div className="h-1 bg-blue-500 rounded animate-pulse absolute top-0 left-0" style={{width: '60%'}}></div>
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="bg-blue-500 rounded-full p-2 animate-bounce">
-                <svg className="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M10.293 3.293a1 1 0 011.414 0l6 6a1 1 0 010 1.414l-6 6a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-4.293-4.293a1 1 0 010-1.414z" clipRule="evenodd" />
-                </svg>
-              </div>
-            </div>
+          <p className="text-xs text-gray-400 mt-2">{selectedRecommendation?.percentage}% Moving</p>
+        </div>
+
+        <div className="flex-1 relative h-6 mt-8 rounded bg-gray-700 overflow-hidden">
+          <div
+            className="absolute top-0 left-0 h-6 bg-blue-500 rounded transition-all duration-[4000ms] ease-in-out"
+            style={{ width: selectedRecommendation ? `${selectedRecommendation.percentage}%` : '0%' }}
+          />
+        </div>
+
+        <div className="text-center">
+          <div className="bg-green-500/20 border-2 border-green-500 rounded-lg p-4 w-24 h-24 flex items-center justify-center animate-pulse">
+            <span className="text-white font-bold text-sm">{selectedRecommendation?.toPool}</span>
           </div>
-          
-          <div className="text-center">
-            <div className="bg-green-500/20 border-2 border-green-500 rounded-lg p-4 w-24 h-24 flex items-center justify-center">
-              <span className="text-white font-bold text-sm">{selectedRecommendation?.toPool}</span>
-            </div>
-            <p className="text-xs text-gray-400 mt-2">Receiving Liquidity</p>
-          </div>
+          <p className="text-xs text-gray-400 mt-2">Receiving Liquidity</p>
         </div>
       </div>
-      
+
       <h3 className="text-lg font-semibold text-white mb-2">AI Rebalancing in Progress</h3>
       <p className="text-gray-400 mb-4">Optimizing your portfolio across pools...</p>
-      
-      <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
+
+      <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 max-w-xl mx-auto">
         <div className="space-y-2 text-sm">
           <div className="flex justify-between">
             <span className="text-gray-400">Transaction Hash:</span>
-            <span className="text-blue-400 font-mono">{txHash.slice(0, 16)}...{txHash.slice(-8)}</span>
+            {txHash ? (
+              <span className="text-blue-400 font-mono">{txHash.slice(0, 16)}...{txHash.slice(-8)}</span>
+            ) : (
+              <span className="text-gray-500 italic">Pending submission...</span>
+            )}
           </div>
           <div className="flex justify-between">
             <span className="text-gray-400">Expected IL Reduction:</span>
@@ -285,8 +279,8 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
         <h3 className="text-lg font-semibold text-white mb-2">AI Rebalancing Complete!</h3>
         <p className="text-gray-400">Your portfolio has been optimized for reduced IL exposure</p>
       </div>
-      
-      <div className="grid grid-cols-2 gap-4 text-sm">
+
+      <div className="grid grid-cols-2 gap-4 text-sm max-w-md mx-auto">
         <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
           <p className="text-gray-400">Previous IL</p>
           <p className="text-lg font-bold text-red-400">{vault.ilPercentage.toFixed(2)}%</p>
@@ -296,7 +290,7 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
           <p className="text-lg font-bold text-green-400">{selectedRecommendation?.expectedIL}%</p>
         </div>
       </div>
-      
+
       <button
         onClick={onClose}
         className="mt-6 bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors"
@@ -316,13 +310,13 @@ export function AIRebalanceModal({ isOpen, onClose, vault }: AIRebalanceModalPro
           <button
             onClick={onClose}
             className="text-gray-400 hover:text-white"
+            aria-label="Close modal"
           >
             <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
             </svg>
           </button>
         </div>
-        
         {step === 'analysis' && renderAnalysisStep()}
         {step === 'recommendations' && renderRecommendationsStep()}
         {step === 'signing' && renderSigningStep()}

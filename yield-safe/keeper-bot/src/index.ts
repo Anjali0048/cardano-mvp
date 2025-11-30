@@ -39,16 +39,25 @@ async function main() {
     const blockchainSync = new BlockchainVaultSync(lucid, database);
     const keeperBot = new KeeperBot(lucid, database, poolMonitor, ilCalculator, config);
     
-    // Sync vaults from blockchain first
+    // Sync vaults from blockchain first (non-blocking)
     logger.info("🔄 Syncing real vaults from blockchain...");
-    await blockchainSync.syncVaultsFromBlockchain();
+    try {
+      await blockchainSync.syncVaultsFromBlockchain();
+      
+      // Start periodic vault sync every 5 minutes
+      await blockchainSync.startPeriodicSync(5);
+    } catch (error) {
+      logger.warn("⚠️  Blockchain sync failed, continuing without real vaults:", error);
+      logger.info("💡 Tip: Check your BLOCKFROST_API_KEY and CARDANO_NETWORK configuration");
+    }
     
-    // Start periodic vault sync every 5 minutes
-    await blockchainSync.startPeriodicSync(5);
-    
-    // Start monitoring pools for price changes
+    // Start monitoring pools for price changes (non-blocking)
     logger.info("📊 Starting pool monitoring...");
-    await poolMonitor.startMonitoring();
+    try {
+      await poolMonitor.startMonitoring();
+    } catch (error) {
+      logger.warn("⚠️  Pool monitoring failed:", error);
+    }
     
     // Schedule keeper bot operations
     logger.info("⏰ Scheduling keeper operations...");
