@@ -71,6 +71,16 @@ export function Layout({ children }: LayoutProps) {
                   >
                     🤖 AI Agent
                   </Link>
+                   <Link
+                     to="/ai-rebalancer"
+                     className={`px-3 py-2 rounded-md text-sm font-medium transition-colors duration-200 ${
+                       isActive('/ai-rebalancer')
+                         ? 'bg-gradient-to-r from-blue-600 to-purple-600 text-white'
+                         : 'text-gray-300 hover:text-white hover:bg-blue-700'
+                     }`}
+                   >
+                     🧠 AI Rebalancer
+                   </Link>
                 </div>
               </div>
             </div>

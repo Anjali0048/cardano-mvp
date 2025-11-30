@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { AIRebalanceModal } from './AIRebalanceModal'
 import { enhancedAPI } from '../lib/enhancedAPI'
 import toast from 'react-hot-toast'
 
@@ -23,6 +24,7 @@ interface VaultCardProps {
 export function VaultCard({ vault }: VaultCardProps) {
   const [aiPrediction, setAiPrediction] = useState<any>(null)
   const [loadingPrediction, setLoadingPrediction] = useState(false)
+  const [showAIRebalance, setShowAIRebalance] = useState(false)
 
   const loadAIPrediction = async () => {
     setLoadingPrediction(true)
@@ -145,15 +147,46 @@ export function VaultCard({ vault }: VaultCardProps) {
         </div>
       )}
 
+      {/* AI Rebalance Button */}
+      {vault.ilPercentage > vault.ilThreshold * 0.5 && (
+        <button
+          onClick={() => setShowAIRebalance(true)}
+          className="w-full mb-4 py-3 px-4 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 rounded-lg text-white font-medium transition-all duration-200 transform hover:scale-105"
+        >
+          <div className="flex items-center justify-center space-x-2">
+            <span className="text-lg">🤖</span>
+            <span>AI Rebalance</span>
+            <span className="text-xs bg-white/20 px-2 py-1 rounded">Smart</span>
+          </div>
+          <div className="text-xs text-purple-200 mt-1">
+            Optimize your position with AI-powered pool switching
+          </div>
+        </button>
+      )}
+
       <div className="flex items-center justify-between text-sm text-gray-400">
         <span>Last updated {formatTimeAgo(vault.lastUpdate)}</span>
         <Link 
           to={`/vault/${vault.id}`}
-          className="text-blue-400 hover:text-blue-300 font-medium"
+          className="text-blue-400 hover:text-blue-300 text-sm"
         >
           View Details →
         </Link>
       </div>
+
+      {/* AI Rebalance Modal */}
+      <AIRebalanceModal
+        isOpen={showAIRebalance}
+        onClose={() => setShowAIRebalance(false)}
+        vault={{
+          id: vault.id,
+          tokenA: vault.tokenA,
+          tokenB: vault.tokenB,
+          depositAmount: vault.depositAmount,
+          ilPercentage: vault.ilPercentage,
+          ilThreshold: vault.ilThreshold
+        }}
+      />
     </div>
   )
 }
